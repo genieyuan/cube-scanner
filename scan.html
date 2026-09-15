@@ -1,0 +1,1618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>2x2 Cube Scanner · 扫描我的魔方</title>
+<style>
+:root{
+  --page:#fff3e2; --ink:#17223b; --muted:#6b6152; --line:#f0dcc0; --panel:#fff;
+  --amber:#d97a1f; --amber-d:#b5541d; --ok:#13a85a; --bad:#e7322c;
+}
+*{box-sizing:border-box}
+html{background:var(--page)}
+body{margin:0;color:var(--ink);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+     background:radial-gradient(circle at 12% 2%,#fffaf2 0,transparent 30rem),linear-gradient(145deg,#fff6ea,#fbe7cd)}
+
+
+.wrap{width:min(1000px,100%);margin:auto;padding:22px clamp(16px,4vw,40px) 48px}
+h1{font-size:clamp(22px,4vw,32px);letter-spacing:-.03em;margin:.2em 0}
+.sub{color:var(--muted);margin-top:0}
+.card{border:1px solid var(--line);border-radius:18px;background:var(--panel);padding:20px;box-shadow:0 14px 36px #b5541d14}
+.grid{display:grid;grid-template-columns:minmax(320px,1fr) minmax(260px,.75fr);gap:16px;align-items:start}
+@media(max-width:820px){.grid{grid-template-columns:1fr}}
+
+/* step banner */
+.stepbar{text-align:center;margin-bottom:14px}
+.pill{background:#fff0dc;color:var(--amber-d);border-radius:999px;padding:5px 12px;font-weight:800;font-size:13px;white-space:nowrap}
+.instruction{font-size:clamp(18px,3vw,24px);font-weight:800;letter-spacing:-.02em;text-align:center}
+.hint{color:var(--muted);margin:6px auto 0;max-width:46ch;text-align:center}
+
+/* camera stage */
+.stage{position:relative;width:100%;aspect-ratio:4/3;background:#241c14;border-radius:14px;overflow:hidden;display:grid;place-items:center}
+video,canvas.feed{width:100%;height:100%;object-fit:cover;display:block}
+/* Laptop cameras hand back the RAW scene, not a mirror image: hold the cube's red square
+   on your right and it lands on the left of the frame. Flip the preview so it behaves like
+   a mirror, and flip the sampling to match (see sampleFromVideo). */
+video.mirrored{transform:scaleX(-1)}
+.placeholder{color:#f3d9b6;text-align:center;padding:22px;font-weight:600}
+.overlay{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+.target{width:var(--boxpct,46%);aspect-ratio:1;border:3px solid #fff;border-radius:12px;box-shadow:0 0 0 9999px #0006;display:grid;
+        grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+.target div{border:1px dashed #ffffff88;display:grid;place-items:center}
+/* Each probe shows the AVERAGE COLOUR ACTUALLY BEING SAMPLED from that quadrant, live.
+   If a probe does not match the sticker behind it, the box is not on the cube — a framing
+   problem, not a classification one, and no calibration can fix it. */
+.probe{width:26px;height:26px;border-radius:50%;border:2px solid #fff;box-shadow:0 2px 8px #0007;
+       background:#0000;transition:background .12s linear}
+/* When the preview is mirrored the OVERLAY must mirror with it. Otherwise each probe is
+   drawn over the sticker's mirror twin: the sampling is correct but every dot shows a
+   colour from the opposite side, which looks exactly like a broken reading.
+   Found 2026-09-14 — a face of four different colours made it obvious. */
+.stage.mirrored .overlay{transform:scaleX(-1)}
+/* 2026-09-15 (the maintainer): no circles inside the align box. The square + dashed quarters stay. */
+.probe{display:none}
+/* Technical detail is hidden unless Advanced > Show technical messages is on. */
+.dbg{display:none!important}
+body.debug .dbg{display:revert!important}
+.f3 b{display:none}
+body.debug .f3 b{display:block}
+/* Honest progress: a captured face shows a tick until the colours are actually read. */
+.facebox.ticked::after{content:'✓';position:absolute;inset:0;display:grid;place-items:center;
+  font-size:22px;font-weight:900;color:#fff;text-shadow:0 1px 3px #0008}
+.flips{display:flex;gap:8px;justify-content:center;margin-top:8px;flex-wrap:wrap}
+.flips[hidden]{display:none}
+.flips button{padding:8px 12px;font-size:13px}
+.fliphint{text-align:center;color:#7a4a12;font-size:12px;font-weight:700;margin:6px 0 0;min-height:1em}
+
+.turnhint{position:absolute;left:0;right:0;bottom:10px;text-align:center;color:#fff;font-weight:700;
+          text-shadow:0 2px 8px #000a;font-size:14px}
+.autohint{position:absolute;left:0;right:0;top:10px;text-align:center;color:#ffe6c7;font-weight:700;
+          text-shadow:0 2px 8px #000a;font-size:13px;min-height:18px}
+.autohint.ready{color:#7ef0a6}
+
+/* controls */
+.row{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}
+button{font:inherit;border:0;border-radius:11px;padding:11px 16px;font-weight:750;cursor:pointer;
+       transition:transform .14s ease,box-shadow .14s ease,opacity .14s}
+button:active{transform:translateY(1px)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.primary{background:var(--amber);color:#fff;box-shadow:0 7px 16px #d97a1f45}
+.secondary{background:#fff0dc;color:var(--amber-d)}
+.ghost{background:#f4efe7;color:#6b6152;border:1px solid var(--line)}
+
+/* captured colours for current face */
+.swatches{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:150px;margin-top:12px}
+.sw{aspect-ratio:1;border-radius:9px;border:2px solid #00000018;cursor:pointer;position:relative}
+.sw:focus-visible{outline:3px solid var(--amber)}
+.sw small{position:absolute;left:50%;bottom:4px;transform:translateX(-50%);font-size:10px;color:#0009;font-weight:700}
+
+/* net */
+.net{display:grid;grid-template-columns:repeat(4,42px);grid-template-rows:repeat(3,42px);gap:4px;justify-content:center;margin-top:6px}
+.facebox{display:grid;grid-template-columns:1fr 1fr;gap:2px;padding:2px;background:#e8e2d8;border-radius:6px}
+.facebox i{border-radius:3px;background:#cfc6ba;display:block}
+.facebox.done{background:var(--amber)}
+.facebox{position:relative;transition:transform .18s ease,box-shadow .18s ease}
+.facebox.current{outline:3px solid var(--amber);outline-offset:3px;animation:facepulse 1.3s ease-in-out infinite;z-index:2}
+.facebox.clickable{cursor:pointer}
+.facebox.clickable:hover{transform:scale(1.08);box-shadow:0 6px 16px #b5541d33}
+.facebox b{position:absolute;top:-9px;left:50%;transform:translateX(-50%);font-size:9px;font-weight:800;
+  letter-spacing:.04em;color:var(--amber-d);background:var(--panel);padding:0 4px;border-radius:4px;white-space:nowrap}
+@keyframes facepulse{50%{outline-color:#f3b878;box-shadow:0 0 0 6px #d97a1f1f}}
+.netnote{text-align:center;color:var(--muted);font-size:12px;margin:10px 0 0}
+.preview3d{display:grid;place-items:center;height:150px;perspective:520px;margin:4px 0 2px}
+.cube3d{position:relative;width:84px;height:84px;transform-style:preserve-3d;
+        transform:rotateX(-22deg) rotateY(-34deg);transition:transform .4s ease}
+.f3{position:absolute;inset:0;display:grid;grid-template-columns:1fr 1fr;gap:3px;padding:3px;
+    background:#1b2436;border-radius:7px;backface-visibility:hidden}
+.f3 i{border-radius:4px;background:#3a4358;box-shadow:inset 0 1px 2px #fff2,inset 0 -2px 4px #0003;
+      transition:background .25s ease}
+.f3-F{transform:translateZ(42px)}
+.f3-B{transform:rotateY(180deg) translateZ(42px)}
+.f3-R{transform:rotateY(90deg) translateZ(42px)}
+.f3-L{transform:rotateY(-90deg) translateZ(42px)}
+.f3-U{transform:rotateX(90deg) translateZ(42px)}
+.f3-D{transform:rotateX(-90deg) translateZ(42px)}
+.f3 b{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:9px;font-weight:800;
+      color:#fff;text-shadow:0 1px 3px #000c;pointer-events:none;letter-spacing:.04em;opacity:.85}
+.preview3d{cursor:grab;touch-action:none;user-select:none}
+.preview3d.dragging{cursor:grabbing}
+.spinhint{text-align:center;color:var(--muted);font-size:11px;margin:0}
+.lang{padding:9px 15px;border:1px solid var(--line);border-radius:999px;background:#fff;
+      color:var(--amber-d);font-weight:750;cursor:pointer}
+h1{font-size:clamp(22px,4vw,30px);letter-spacing:-.03em;margin:.2em 0}
+.quiet{color:var(--muted);font-weight:500;font-size:12px}
+.btn3{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.btn3 button{width:100%}
+.btn3 button[hidden]{display:none}
+.statusrow{display:flex;align-items:center;justify-content:center;gap:7px;margin-top:12px;line-height:1}
+.helpwrap{position:relative;display:inline-flex;align-items:center;outline:none}
+.help{display:grid;place-items:center;width:17px;height:17px;border-radius:50%;cursor:help;
+      background:var(--amber);color:#fff;font-size:11px;font-weight:800;line-height:1;
+      font-family:inherit;padding-bottom:1px}
+.helptip{position:absolute;bottom:130%;left:50%;transform:translateX(-50%);width:270px;
+         background:#2b2119;color:#fff;font-weight:500;font-size:12px;line-height:1.5;
+         padding:10px 12px;border-radius:10px;box-shadow:0 10px 30px #0004;
+         opacity:0;visibility:hidden;transition:opacity .15s ease;z-index:20;text-align:left}
+.helpwrap:hover .helptip,.helpwrap:focus .helptip{opacity:1;visibility:visible}
+.adv{margin-top:12px;padding:0}
+.adv summary{cursor:pointer;padding:12px 16px;font-weight:750;list-style:none}
+.adv summary::-webkit-details-marker{display:none}
+.adv summary::before{content:'▸ ';color:var(--amber)}
+.adv[open] summary::before{content:'▾ '}
+.advbody{padding:0 16px 14px;display:flex;flex-direction:column;gap:9px;border-top:1px solid var(--line)}
+.advbody .chk{font-size:13px}
+.legend{display:flex;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:12px}
+.k{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid #0002;vertical-align:-2px;margin-right:4px}
+.status{margin-top:12px;font-weight:700}
+.status.ok{color:var(--ok)} .status.bad{color:var(--bad)}
+.msg{margin-top:14px;padding:14px 16px;border-radius:12px;border:1px solid;line-height:1.5}
+.msg h4{margin:0 0 6px;font-size:15px}
+.msg.warn{background:#fff4e5;border-color:#f0c489;color:#7a4a12}
+.msg.err{background:#fdecea;border-color:#f3b7b3;color:#8c221d}
+.msg.good{background:#e8f7ee;border-color:#a6dfbd;color:#146c3a}
+.msg code{background:#00000010;color:inherit}
+.diag{margin:10px 0 0;font:12px ui-monospace,Menlo,monospace;color:#8a7c69}
+#inspector table{border-collapse:collapse;width:100%;font:11px ui-monospace,Menlo,monospace;margin-top:8px}
+#inspector th{text-align:left;padding:3px 6px;border-bottom:1px solid #0002;font-weight:800}
+#inspector td{padding:3px 6px;border-bottom:1px solid #0001;white-space:nowrap}
+#inspector .chip{display:inline-block;width:22px;height:14px;border-radius:3px;border:1px solid #0003;vertical-align:-3px}
+#inspector tr.bad td{background:#ffdfdc}
+#inspector .grp{margin-top:10px;font:12px ui-monospace,Menlo,monospace}
+#finish{background:var(--ok);box-shadow:0 7px 16px #13a85a45}
+#build{background:#5142ae;box-shadow:0 7px 16px #5142ae45}
+.state{font:12px ui-monospace,Menlo,monospace;background:#00000010;padding:8px 10px;border-radius:8px;
+       margin-top:8px;word-break:break-all}
+.tally{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:13px}
+.tally span{display:flex;align-items:center;gap:4px}
+.modes{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+label.chk{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px}
+code{font:700 .9em ui-monospace,Menlo,monospace;background:#fff0dc;padding:1px 5px;border-radius:4px;color:var(--amber-d)}
+
+.shotstrip{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0 4px}
+.shotstrip .shot{margin:0;position:relative}
+.shotstrip .shot img{width:100%;display:block;border-radius:7px;border:2px solid transparent}
+.shotstrip .shot.now img,.shotstrip .shot.now span{border-color:var(--amber)}
+.shotstrip .shot span{display:block;width:100%;aspect-ratio:1;border-radius:7px;
+  border:2px dashed #00000018;background:#00000008}
+
+.shotstrip .shot .rd{display:grid;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr);
+  gap:2px;width:38px;margin:3px auto 0}
+.shotstrip .shot .rd i{aspect-ratio:1;border-radius:3px;border:1px solid #0003}
+.shotstrip .shot figcaption{position:absolute;left:4px;top:3px;background:#000000a6;color:#fff;
+  font-size:10px;font-weight:800;padding:0 5px;border-radius:5px}
+</style>
+<script>
+/* Cameras only work on a secure address, and this site is normally reached over plain http
+   on plain http. The original deployment hopped to its https listener here.
+   Guards, in order: never from https, never from localhost (already a secure context),
+   never from a port we do not know, never from inside a frame (the top page does it), and
+   never twice for the same path in one session — so a failed hop cannot become a loop. */
+(function(){
+  try {
+    return;   // open-source build: serve this page over https (or localhost); there is no port hop
+    if (window.top && window.top !== window.self) return;   // nothing frames this any more
+    /* Only guard against a LOOP, not against ever hopping again. The first version set a
+       flag once per tab and never cleared it, so after one hop that tab would sit on the
+       insecure page for the rest of its life showing "the browser is blocking the camera".
+       A loop happens within a second or two; a person coming back later is not a loop. */
+    var k = 'secure-hop:' + location.pathname;
+    var last = +(sessionStorage.getItem(k) || 0);
+    if (last && (Date.now() - last) < 8000) return;
+    sessionStorage.setItem(k, String(Date.now()));
+    location.replace('https://' + location.hostname +
+                     location.pathname + location.search + location.hash);
+  } catch (e) { /* if anything here throws, stay put and show the message instead */ }
+})();
+</script>
+</head>
+<body>
+<div class="wrap">
+  <header style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+    <div>
+      <h1 data-en="Scan my cube" data-zh="扫描我的魔方">Scan my cube</h1>
+      <p class="sub" data-en="Hold your real cube up to the camera. Eight photos and it appears on screen."
+         data-zh="把你的真魔方对着摄像头。拍八次，它就会出现在屏幕上。">Hold your real cube up to the camera. Eight photos and it appears on screen.</p>
+    </div>
+    <button class="lang" id="lang" aria-label="切换到中文">中文</button>
+  </header>
+
+  <div class="modes card" style="padding:12px 16px">
+    <button class="ghost" id="restart" data-en="Start again" data-zh="重新开始">Start again</button>
+    <button class="ghost" id="tocube" data-en="🧊 Back to the cube" data-zh="🧊 回到魔方">🧊 Back to the cube</button>
+    <span style="flex:1"></span>
+    <span class="quiet dbg" id="camstate">camera off</span>
+  </div>
+
+  <details class="adv card" id="adv">
+    <summary><span data-en="Advanced settings" data-zh="高级设置">Advanced settings</span> <span class="quiet" data-en="— leave at default unless something looks wrong" data-zh="— 除非出问题，否则不用改">— leave at default unless something looks wrong</span></summary>
+    <div class="advbody">
+      <label class="chk"><input type="checkbox" id="mirrorcap"> <b data-en="The camera defaults to mirror" data-zh="这个摄像头默认是镜像的">The camera defaults to mirror</b> <span class="quiet" data-en="— tick for the one particular webcam: photos are mirrored only as they are sent to the reader; what you see stays as taken" data-zh="——用 one particular webcam 时勾上：照片只在发给识别器时镜像，你看到的保持原样">— tick for the one particular webcam: photos are mirrored only as they are sent to the reader; what you see stays as taken</span></label>
+      <label class="chk"><input type="checkbox" id="dbg"> <b data-en="Show technical messages" data-zh="显示技术信息">Show technical messages</b></label>
+      <label class="chk dbg" hidden><input type="checkbox" id="nomirrorread"> <b>Camera does NOT mirror</b> — by default the reader is told the camera mirrors the scene and reports the colours as they are on the real cube. Tick this if your camera does not mirror.</label>
+      <label class="chk"><input type="checkbox" id="auto"> <b>Auto-capture</b> — fires on its own when the cube is held steady. <b>Off by default:</b> it competes with the space bar, and deciding when to capture is exactly the judgement we took away from the machine.</label>
+      <label class="chk"><input type="checkbox" id="mirror" checked> <b>Mirror preview</b> — easier to line up; does not change the reading</label>
+      <label class="chk"><input type="checkbox" id="demo"> <b>Demo mode</b> — no camera; invents colours to try the flow</label>
+      <label class="chk">Box size <input type="range" id="boxsize" min="26" max="70" value="46" style="width:110px"> <span id="boxval">46%</span></label>
+      <div class="row dbg" style="margin-top:4px">
+        <button class="ghost" id="inspect">🔬 Show colour readings</button>
+      </div>
+      <p class="diag dbg" id="diag"></p>
+    </div>
+  </details>
+
+  <div class="grid" style="margin-top:14px">
+    <div class="card">
+      <div class="stepbar">
+        <div>
+          <div class="instruction" id="instruction">Hold the cube up to the camera</div>
+          <p class="hint" id="hint">Any face. Keep your fingers off the coloured squares.</p>
+        </div>
+      </div>
+
+      <div class="stage" id="stage">
+        <video id="video" playsinline muted hidden></video>
+        <canvas class="feed" id="sim" hidden></canvas>
+        <div class="placeholder" id="ph">Camera off — demo mode is on.<br><small>Press <b>Capture</b> to simulate reading a face.</small></div>
+        <div class="overlay"><div class="target" id="target">
+          <div></div><div></div><div></div><div></div>
+        </div></div>
+        <div class="turnhint" id="turnhint">Line the cube up inside the white square</div>
+        <div class="autohint" id="autohint"></div>
+      </div>
+
+      <div class="row btn3">
+        <button class="primary" id="capture">Capture</button>
+        <button class="secondary" id="back" data-en="Back" data-zh="上一步">Back</button>
+        <button class="secondary" id="retake" data-en="Retake" data-zh="重拍" disabled>Retake</button>
+        <button class="primary" id="finish" data-en="✓ Finish" data-zh="✓ 完成" hidden>✓ Finish</button>
+        <button class="primary" id="build" data-en="🧊 Build" data-zh="🧊 生成魔方" hidden>🧊 Build</button>
+        <button class="secondary" id="balance" data-en="⚖ Calibrate" data-zh="⚖ 校准颜色" hidden>⚖ Calibrate</button>
+      </div>
+
+      <div id="msg" class="msg" hidden></div>
+
+      <div id="result" class="msg good" hidden></div>
+      <div id="inspector" class="msg warn" hidden></div>
+
+      <div id="shotcount" class="sub" style="text-align:center;font-weight:700;margin:2px 0 0"></div>
+      <div class="shotstrip" id="shotstrip"></div>
+      <div id="swwrap" hidden>
+        <p class="hint" style="margin-top:14px"><b><span data-en="Is this right?" data-zh="这样对吗？">Is this right?</span></b> <span data-en="Tap any square to change its colour." data-zh="点一下格子就能改颜色。">Tap any square to change its colour.</span></p>
+        <div class="swatches" id="swatches"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0" data-en="Progress" data-zh="进度">Progress</h3>
+      <div class="preview3d" id="preview3d"><div class="cube3d" id="cube3d">
+        <div class="f3 f3-U" data-face="U"><i></i><i></i><i></i><i></i><b></b></div>
+        <div class="f3 f3-D" data-face="D"><i></i><i></i><i></i><i></i><b></b></div>
+        <div class="f3 f3-F" data-face="F"><i></i><i></i><i></i><i></i><b></b></div>
+        <div class="f3 f3-B" data-face="B"><i></i><i></i><i></i><i></i><b></b></div>
+        <div class="f3 f3-R" data-face="R"><i></i><i></i><i></i><i></i><b></b></div>
+        <div class="f3 f3-L" data-face="L"><i></i><i></i><i></i><i></i><b></b></div>
+      </div></div>
+      <p class="netnote" id="prevnote"></p>
+      <div class="flips" id="flips" hidden>
+        <button class="secondary" id="fliph" data-en="⇄ Flip sideways" data-zh="⇄ 左右翻转">⇄ Flip sideways</button>
+        <button class="secondary" id="flipv" data-en="⇅ Flip up-down" data-zh="⇅ 上下翻转">⇅ Flip up-down</button>
+      </div>
+      <p class="fliphint" id="fliphint"></p>
+      <p class="netnote dbg" id="fliporder"></p>
+      <p class="spinhint" data-en="Drag the cube to spin it" data-zh="拖动魔方可以转着看">Drag the cube to spin it</p>
+      <div class="net" id="net"></div>
+      <p class="netnote" id="netnote"></p>
+      <div class="legend" id="legend"></div>
+      <div class="statusrow"><span class="status" id="status"></span><span class="helpwrap" tabindex="0"><span class="help">?</span><span class="helptip">Eight captures. First four spins, each bringing the left face to the front, until you are back where you started. Then three rolls, each bringing the top towards you. Captures 5 and 7 are checked against ones you already took, so a wrong turn or a misread colour shows up immediately.</span></span></div>
+      
+    </div>
+  </div>
+</div>
+
+<script>
+const COLOURS = {W:'#f7f7f2',Y:'#ffd500',R:'#e7322c',O:'#ff8c1a',G:'#13a85a',B:'#2a6fdb'};
+const NAMES   = {W:'White',Y:'Yellow',R:'Red',O:'Orange',G:'Green',B:'Blue'};
+const NAMES_ZH= {W:'白',Y:'黄',R:'红',O:'橙',G:'绿',B:'蓝'};
+const cname = c => lang === 'en' ? NAMES[c] : NAMES_ZH[c];
+const ORDER   = ['W','Y','R','O','G','B'];
+
+// Six captures. Instructions are RELATIVE — the child never needs to name a colour.
+const FACE_LABEL = {F:'Front',R:'Right',B:'Back',L:'Left',U:'Top',D:'Bottom'};
+
+/* Two rings of five. Four quarter-turns bring you back where you started, so capture 5
+   MUST equal capture 1 — if it does not, either the turning or the reading was wrong and
+   you find out immediately instead of at the end. the maintainer's design, 2026-09-14.
+     ring 1 (turning left):  F  L  B  R  F*      * must match capture 1
+     ring 2 (tipping up):    F  U  B  D  F*      * must match capture 6, and B must match capture 3
+   Between them every face is seen, with F read four times and B twice. */
+/* Two rings that share their starting face. Four quarter-turns bring you back where you
+   began, so capture 5 MUST equal capture 1 — and capture 5 already leaves the cube facing
+   F, so the second ring carries straight on from there rather than re-capturing it.
+     ring 1 (turning left):  F  L  B  R  F*
+     ring 2 (tipping up):          U  B*  D  F*
+   Eight captures, six faces, two self-checks. the maintainer's design; he caught that a tenth
+   capture was redundant. */
+/* Eight captures, two rings that share a starting face.
+   WORDING: "left/right" proved confusing with a cube in hand and a mirrored preview, so the
+   instructions say CLOCKWISE and DOWN — one word per direction, the same every time. Each
+   is anchored to what physically happens ("the face on your left comes round to the front"),
+   because the direction is what the L/R mapping depends on: turn the other way and left and
+   right swap. The anchor is the authority, the label is just a name for it. */
+/* WORDING: describe the OUTCOME, not a direction word. "Left/right" is ambiguous with a
+   mirrored preview; "clockwise" is ambiguous because it depends which end you look from
+   (this motion is anticlockwise seen from above, clockwise seen from below). Saying which
+   face ends up in front cannot be misread, and it is the thing the L/R mapping depends on.
+   Verified against a real cube: this turn brings the LEFT face to the front. */
+const STEPS = [
+  {face:'F', ring:1,
+   title:'Hold the cube up to the camera', title_zh:'把魔方举到摄像头前',
+   hint:'Any face to start. Keep your fingers off the coloured squares.',
+   hint_zh:'哪一面都行。手指不要挡住彩色的格子。',
+   turn:'Line the cube up inside the white square, then press SPACE', turn_zh:'把魔方对准白色方框，然后按空格键'},
+  {face:'L', ring:1,
+   title:'Spin it so the RIGHT face comes to the front', title_zh:'转动魔方，让右边那一面转到前面',
+   hint:'The face that was on your right now points at the camera. What you have captured should now be on your left hand side. Every turn from here is this same way.',
+   hint_zh:'原来在右边的那一面，现在对着摄像头。刚拍过的那一面会转到你的左手边。接下来每次都朝同一个方向转。',
+   turn:'← right face comes round to the front', turn_zh:'← 右面转到前面'},
+  {face:'B', ring:1,
+   title:'Same spin again', title_zh:'再转一次，方向一样',
+   hint:'RIGHT face comes to the front, exactly as before.',
+   hint_zh:'还是让右面转到前面，和刚才一样。',
+   turn:'← same spin again', turn_zh:'← 同样再转一次'},
+  {face:'R', ring:1,
+   title:'Same spin again', title_zh:'再转一次，方向一样',
+   hint:'Third one. Keep going the same way.',
+   hint_zh:'第三次。继续朝同一个方向转。',
+   turn:'← same spin again', turn_zh:'← 同样再转一次'},
+  {face:'F', ring:1,
+   title:'Same spin once more — back to the start', title_zh:'再转一次，就回到起点了',
+   hint:'You should be back to the face you began with. I will check it matches.',
+   hint_zh:'现在应该回到你一开始拍的那一面了。我会检查是不是对得上。',
+   turn:'← back to the start', turn_zh:'← 回到起点', check:0},
+  {face:'U', ring:2,
+   title:'Now move the TOP towards the camera', title_zh:'现在把顶面朝摄像头翻过来',
+   hint:'Stop spinning sideways. Move the top of the cube towards the camera, so the top face ends up pointing at it.',
+   hint_zh:'不要再左右转了。把魔方的顶面朝摄像头方向翻过来，让顶面对着摄像头。',
+   turn:'↓ top moves towards the camera', turn_zh:'↓ 顶面朝摄像头翻'},
+  {face:'B', ring:2,
+   title:'Same roll again', title_zh:'再往前翻一次',
+   hint:'You are seeing the back face upside down now — that is expected, I turn it back.',
+   hint_zh:'现在看到的背面是倒过来的——这是正常的，我会帮你转正。',
+   turn:'↓ same roll again', turn_zh:'↓ 同样再翻一次', check:2, xform:'rot180'},
+  {face:'D', ring:2,
+   title:'Same roll again', title_zh:'再往前翻一次',
+   hint:'Now the bottom face is pointing at the camera. This is the last one.',
+   hint_zh:'现在底面对着摄像头。这是最后一次了。',
+   turn:'↓ last one', turn_zh:'↓ 最后一次'}
+];
+STEPS.forEach(st => {
+  st.face0 = st.face;
+  Object.defineProperty(st, 'face', { get(){ return labelFor(st.face0); }, enumerable: true });
+});
+const ringOrder = () => STEPS.slice(0,4).map(s=>s.face).join(' ') + ' · ' + STEPS.slice(5,8).map(s=>s.face).join(' ');
+
+let lang = 'en';
+const t = (en, zh) => lang === 'en' ? en : (zh || en);
+
+let step = 0, captured = {}, pending = null, stream = null;
+let shots = {};   // per-STEP-index readings, so repeats can be compared
+let lastRaw = null, rawByFace = {};
+let boxPct = 46;
+const camMirrors = false;   // the per-device "this camera mirrors" tick was retired 2026-09-15 (fed only the HSV path)
+const $ = id => document.getElementById(id);
+
+/* ---- 2026-09-15, the maintainer's design: camera position, flip buttons, honest progress, debug ----
+   camPos  'face' (camera looks at you — today's behaviour) or 'back' (camera sees the cube the
+           way you do). The back set-up is the exact mirror of the face set-up, so ring-1 labels
+           swap L<->R and nothing is mirrored anywhere: preview, reader note, none of it.
+   flipH / flipV  the two buttons. Sideways swaps the L and R captures (three quarter-turns one
+           way IS one quarter-turn the other way, so the wrong-way step-2 photo is the right-way
+           step-4 photo). Up-down swaps U and D the same way. B (180°) is unchanged either way.
+   The labels are computed, never stored: STEPS[i].face is a getter over face0. */
+/* Back-camera mode was built and then removed the same afternoon (the maintainer: "really confusing").
+   The label logic keeps the switch so it can come back; the UI for it is gone and it is always 'face'. */
+const camPos = 'face';
+let flipH = false, flipV = false;
+let mirrorCap = false;                                   // LAB: "The camera defaults to mirror" (Advanced), remembered per device
+try { mirrorCap = localStorage.getItem('scan-mirror-capture') === '1'; } catch(e){}
+let debugOn = false;
+try { debugOn = localStorage.getItem('scan-debug') === '1'; } catch(e){}
+const SWAP_H = {L:'R', R:'L'}, SWAP_V = {U:'D', D:'U'};
+function labelFor(face0){
+  let f = face0;
+  if((camPos === 'back') !== flipH) f = SWAP_H[f] || f;
+  if(flipV) f = SWAP_V[f] || f;
+  return f;
+}
+
+/* This page is shown inside a tab on scan.html. A plain location.href would load the
+   cube INSIDE that frame, leaving the tabs wrapped around it. Navigate the top window. */
+function goTop(url){
+  try {
+    if (window.top && window.top !== window.self) { window.top.location.href = url; return; }
+  } catch(e){}
+  location.href = url;
+}
+
+
+/* ---------- demo mode: invent a plausible, self-consistent cube ---------- */
+function demoCube(){
+  // a real 2x2 has exactly 4 of each colour; deal them out, then shuffle per face
+  const bag = [];
+  ORDER.forEach(c => { for(let i=0;i<4;i++) bag.push(c); });
+  for(let i=bag.length-1;i>0;i--){ const j=Math.random()*(i+1)|0; [bag[i],bag[j]]=[bag[j],bag[i]]; }
+  const out = {};
+  const uniq = [...new Set(STEPS.map(s=>s.face))];
+  uniq.forEach((f,i)=> out[f] = bag.slice(i*4,(i+1)*4));
+  return out;
+}
+let DEMO = demoCube();
+
+/* ---------- colour sampling from the real feed ---------- */
+function sampleFromVideo(){
+  const v = $('video');
+  const raw = [];
+  const out = [];
+  if(!v.videoWidth) { lastRaw = null; return ['W','W','W','W']; }
+
+  /* Map the ON-SCREEN target box into RAW VIDEO coordinates.
+     The video is displayed with object-fit:cover — scaled up and centre-cropped to fill the
+     element — while the canvas holds the raw frame. Sampling a centred square of the raw
+     frame therefore reads a DIFFERENT region from the one the white box is drawn over.
+     That is why all four probes could come back the same colour while the box visibly sat
+     across four different stickers. the maintainer caught it 2026-09-14 with the live probes.  */
+  const rect = v.getBoundingClientRect();
+  const Wd = rect.width, Hd = rect.height;
+  const Wv = v.videoWidth, Hv = v.videoHeight;
+  const scale = Math.max(Wd / Wv, Hd / Hv);           // object-fit: cover
+  const shownW = Wv * scale, shownH = Hv * scale;
+  const offX = (Wd - shownW) / 2, offY = (Hd - shownH) / 2;   // negative = cropped
+
+  const sideD = Wd * (boxPct / 100);                   // .target is a % of element width
+  const boxXd = (Wd - sideD) / 2, boxYd = (Hd - sideD) / 2;
+  const toVideo = (xd, yd) => [ (xd - offX) / scale, (yd - offY) / scale ];
+  const [bx, by] = toVideo(boxXd, boxYd);
+  const sideV = sideD / scale;
+  const half = sideV / 2;
+
+  const c = document.createElement('canvas');
+  c.width = Wv; c.height = Hv;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(v, 0, 0, Wv, Hv);                      // raw frame, no cropping
+
+  for(let r=0;r<2;r++) for(let q=0;q<2;q++){
+    // Some cameras hand back an already-mirrored frame and some do not (MacBook built-in
+    // does not; one particular webcam does), so which column is which is a per-device setting.
+    const col = camMirrors ? (1-q) : q;
+    const sx = bx + col*half + half*0.25;
+    const sy = by + r*half + half*0.25;
+    const sw = Math.max(2, half*0.5), sh = Math.max(2, half*0.5);
+    let R=0,G=0,B=0,n=0;
+    try {
+      const d = ctx.getImageData(Math.round(sx), Math.round(sy), Math.round(sw), Math.round(sh)).data;
+      for(let i=0;i<d.length;i+=4){R+=d[i];G+=d[i+1];B+=d[i+2];n++;}
+    } catch(e){ n = 0; }
+    const rgb = n ? [R/n,G/n,B/n] : [0,0,0];
+    raw.push(rgb);
+    out.push(classify(rgb[0],rgb[1],rgb[2]));
+  }
+  lastRaw = raw;
+  return out;
+}
+
+/* ---------- calibration: classify all 24 stickers TOGETHER ----------
+   Judging each sticker against fixed thresholds fails under real lamps — red drifts into
+   orange, white into yellow. But a cube gives us a constraint no single sticker has:
+   there are exactly six colours and exactly four of each. So once all 24 are captured we
+   sort them out relative to one another instead of against absolute values.
+     1. the four LEAST saturated are white, whatever "white" looks like in this room
+     2. the remaining 20 sort by hue into five clean groups of four
+     3. each group is named by its average hue
+   This calibrates to this cube, this camera and this lighting, with no extra steps. */
+function rgb2hsv(r,g,b){
+  r/=255; g/=255; b/=255;
+  const mx=Math.max(r,g,b), mn=Math.min(r,g,b), d=mx-mn;
+  let h=0;
+  if(d){
+    if(mx===r) h=((g-b)/d+(g<b?6:0));
+    else if(mx===g) h=(b-r)/d+2;
+    else h=(r-g)/d+4;
+    h*=60;
+  }
+  return [h, mx? d/mx : 0, mx];
+}
+
+function autoBalance(){
+  const faces = STEPS.map(s=>s.face);
+  if(!faces.every(f=>rawByFace[f])) return null;      // need raw samples for all six
+  const items = [];
+  faces.forEach(f => rawByFace[f].forEach((rgb,i) => {
+    const [h,sat,v] = rgb2hsv(rgb[0],rgb[1],rgb[2]);
+    items.push({f,i,h,sat,v});
+  }));
+
+  // 1. white = the four least saturated
+  const bySat = [...items].sort((a,b)=>a.sat-b.sat);
+  const white = new Set(bySat.slice(0,4).map(x=>x.f+':'+x.i));
+
+  // 2. remaining 20 by hue, split at the biggest gap so the wrap-around never cuts a group
+  const rest = items.filter(x=>!white.has(x.f+':'+x.i)).sort((a,b)=>a.h-b.h);
+  let gap=-1, gapAt=0;
+  for(let k=0;k<rest.length;k++){
+    const d = (rest[(k+1)%rest.length].h - rest[k].h + 360) % 360;
+    if(d>gap){ gap=d; gapAt=(k+1)%rest.length; }
+  }
+  const ordered = rest.slice(gapAt).concat(rest.slice(0,gapAt));
+
+  // 3. five consecutive groups of four, named by average hue
+  const NAMED = [['R',0],['O',30],['Y',55],['G',130],['B',220]];
+  const groups = [];
+  for(let k=0;k<5;k++) groups.push(ordered.slice(k*4,(k+1)*4));
+  const used = new Set();
+  const assign = groups.map(g=>{
+    let sx=0, sy=0;
+    g.forEach(x=>{ const r=x.h*Math.PI/180; sx+=Math.cos(r); sy+=Math.sin(r); });
+    let mean = Math.atan2(sy/g.length, sx/g.length)*180/Math.PI; if(mean<0) mean+=360;
+    let best=null, bestD=Infinity;
+    NAMED.forEach(([name,hue])=>{
+      if(used.has(name)) return;
+      const d = Math.min(Math.abs(mean-hue), 360-Math.abs(mean-hue));
+      if(d<bestD){ bestD=d; best=name; }
+    });
+    used.add(best);
+    return best;
+  });
+
+  const next = {};
+  faces.forEach(f => next[f] = captured[f] ? captured[f].slice() : ['W','W','W','W']);
+  items.forEach(x => { if(white.has(x.f+':'+x.i)) next[x.f][x.i]='W'; });
+  groups.forEach((g,gi)=> g.forEach(x => { next[x.f][x.i] = assign[gi]; }));
+  captured = next;
+  return assign;
+}
+
+// Deliberately simple for the simulation. The real thing should calibrate against THIS
+// cube under THIS light and cluster 24 stickers into 6 groups of 4 — see the notes.
+function classify(r,g,b){
+  const max=Math.max(r,g,b), min=Math.min(r,g,b), d=max-min;
+  if(d<34) return 'W';
+  let h;
+  if(max===r) h=((g-b)/d+(g<b?6:0)); else if(max===g) h=(b-r)/d+2; else h=(r-g)/d+4;
+  h*=60;
+  if(h<18||h>=345) return 'R';
+  if(h<45) return 'O';
+  if(h<70) return 'Y';
+  if(h<170) return 'G';
+  return 'B';
+}
+
+/* ---------- ui ---------- */
+function renderStep(){
+  try{ renderShots(); }catch(e){}
+  const s = STEPS[step];
+  $('instruction').textContent = t(s.title, s.title_zh);
+  $('hint').textContent = t(s.hint, s.hint_zh);
+  $('turnhint').textContent = t(s.turn, s.turn_zh);   // autoTick writes to #autohint now, never here
+  const ah0 = $('autohint'); if(ah0){ ah0.className='autohint'; ah0.textContent=''; }
+  $('back').disabled = (step === 0);
+  $('result').hidden = true;          // any change invalidates the previous verdict
+
+  const existing = shots[step];
+  if(existing){
+    // Revisiting a face we already read — show what we got so it can be corrected in place,
+    // rather than making the child capture it again just to change one square.
+    $('instruction').textContent = t('Photo ','第 ') + (step+1) + t(' — already taken',' 张——已经拍过了');
+    $('hint').textContent = modelRead
+      ? t('Tap any square to fix a colour, or hold the cube up and press SPACE to take it again.','点一下格子可以改颜色，或者把魔方举起来按空格键重拍。')
+      : t('Hold the cube up and press SPACE to take this one again, or press Back.','把魔方举起来按空格键重拍这一张，或者按「上一步」。');
+    showSwatches(existing);
+    $('capture').textContent = modelRead ? t('Save','保存') : t('Take again','重拍');
+  } else {
+    $('swwrap').hidden = true;
+    $('retake').disabled = true;
+    $('capture').textContent = t('Capture','拍这一面');
+  }
+  renderNet();
+}
+
+/* Live cube preview. Shows the three faces you can actually see from one viewpoint and
+   fills them in the moment each is captured, so the cube "prints" as you scan rather than
+   appearing all at once at the end. Uncaptured stickers stay dark. */
+function renderPreview(){
+  ['U','D','F','B','R','L'].forEach(f => {
+    const el = document.querySelector('.f3-' + f);
+    if(!el) return;
+    const got = modelRead ? captured[f] : null;    // never paint the local HSV guess
+    [...el.querySelectorAll('i')].forEach((cell,i) => {
+      cell.style.background = got ? COLOURS[got[i]] : '#3a4358';
+    });
+    // which capture numbers fed this face — so a wrong face names its own step
+    const froms = STEPS.map((s,i)=> s.face===f && shots[i] ? (i+1) : null).filter(Boolean);
+    const lab = el.querySelector('b');
+    if(lab) lab.textContent = froms.length ? f + ' · ' + froms.join(',') : f;
+  });
+  const total = modelRead ? Object.keys(captured).length : 0;
+  const note = $('prevnote');
+  if(note){
+    note.textContent = !modelRead
+      ? t('Your cube appears here after all eight photos.','拍完八张后，魔方会显示在这里。')
+      : (total < 6 ? total + t(' of 6 faces read',' / 6 面已读') : t('All six faces read','六面都读好了'));
+  }
+  const fl = $('flips'); if(fl) fl.hidden = !modelRead;
+  const fo = $('fliporder'); if(fo) fo.textContent = modelRead ? ringOrder() : '';
+  applySpin();
+}
+
+/* Drag to spin. The preview is the only way to see the back, left and bottom, and a face
+   that looks wrong now names the capture that produced it — so "which step is wrong" is
+   answerable by looking rather than by re-scanning. */
+let spinX = -22, spinY = -34, spinDrag = null;
+function applySpin(){
+  const c = $('cube3d');
+  if(c) c.style.transform = `rotateX(${spinX}deg) rotateY(${spinY}deg)`;
+}
+(function initSpin(){
+  const host = $('preview3d');
+  if(!host) return;
+  host.addEventListener('pointerdown', e => {
+    spinDrag = {x:e.clientX, y:e.clientY, sx:spinX, sy:spinY};
+    host.classList.add('dragging');
+    host.setPointerCapture(e.pointerId);
+  });
+  host.addEventListener('pointermove', e => {
+    if(!spinDrag) return;
+    spinY = spinDrag.sy + (e.clientX - spinDrag.x) * 0.5;
+    spinX = spinDrag.sx - (e.clientY - spinDrag.y) * 0.5;
+    spinX = Math.max(-89, Math.min(89, spinX));
+    const c = $('cube3d');
+    if(c) c.style.transition = 'none';
+    applySpin();
+  });
+  const end = e => {
+    spinDrag = null;
+    host.classList.remove('dragging');
+    const c = $('cube3d');
+    if(c) c.style.transition = 'transform .4s ease';
+  };
+  host.addEventListener('pointerup', end);
+  host.addEventListener('pointercancel', end);
+})();
+
+function renderNet(){
+  // simple cross-ish layout: L F R B on row 2, U above F, D below F
+  const slots = [null,'U',null,null, 'L','F','R','B', null,'D',null,null];
+  const currentFace = STEPS[step] ? STEPS[step].face : null;
+  $('net').innerHTML = slots.map(f=>{
+    if(!f) return '<span></span>';
+    const taken = STEPS.some((s,i)=> s.face===f && shots[i] !== undefined);   // photo exists
+    const got = modelRead ? captured[f] : null;                                // colours known
+    const cls = ['facebox'];
+    if(taken) cls.push('done');
+    if(taken && !got) cls.push('ticked');
+    if(f === currentFace) cls.push('current');
+    if(taken && f !== currentFace) cls.push('clickable');
+    const label = f === currentFace ? '<b>' + t('NOW','现在') + '</b>' : '';
+    const tip = taken ? `${FACE_LABEL[f]} — click to redo` : `${FACE_LABEL[f]} — not captured yet`;
+    return `<div class="${cls.join(' ')}" data-face="${f}" title="${tip}">` + label +
+      [0,1,2,3].map(i=>`<i style="background:${got?COLOURS[got[i]]:(taken?'#e0a86a':'#cfc6ba')}"></i>`).join('') + '</div>';
+  }).join('');
+  const stepsDone = Object.keys(shots).length;     // captures taken, out of STEPS.length
+  const doneCount = Object.keys(captured).length;  // distinct faces seen, out of 6
+  renderPreview();
+  const fin = $('finish'), bld = $('build');
+  if(fin) fin.hidden = (stepsDone < STEPS.length) || !modelRead;
+  if(bld) bld.hidden = (stepsDone < STEPS.length) || !modelRead;
+  const bal = $('balance');
+  if(bal) bal.hidden = true;     // HSV recalibration — retired, the model reads the colours
+  // The inspector button stays visible at all times. Hiding it meant you could neither see
+  // it nor learn why it was missing — it now explains itself instead.
+  $('netnote').textContent = stepsDone
+    ? t('Click any ticked face to take that photo again.','点一下打勾的面可以重拍那一张。')
+    : t('The highlighted square is the face you are photographing now.','高亮的格子就是你现在要拍的那一面。');
+  const n = new Set(STEPS.filter((s,i)=>shots[i] !== undefined).map(s=>s.face)).size;
+  const st = $('status');
+  if(stepsDone < STEPS.length){
+    st.className='status';
+    st.textContent = lang === 'en' ? `${stepsDone} of ${STEPS.length} photos · ${n} of 6 faces` : `已拍 ${stepsDone}/${STEPS.length} 张 · 已看到 ${n}/6 面`;
+    return;
+  }
+  if(!modelRead){ st.className='status'; st.textContent = t('Reading the colours…','正在辨识颜色…'); return; }
+  const tally = {}; Object.values(captured).flat().forEach(c=>tally[c]=(tally[c]||0)+1);
+  const bad = ORDER.filter(c=>(tally[c]||0)!==4);
+  if(bad.length){ st.className='status bad';
+    st.textContent = '⚠ Not a possible cube — ' + bad.map(c=>`${NAMES[c]}×${tally[c]||0}`).join(', ') + ' (each colour must appear 4 times)'; }
+  else { st.className='status ok'; st.textContent = '✓ All six faces read, four of every colour. This is a valid cube.'; }
+}
+
+function showSwatches(vals){
+  pending = vals.slice();
+  // paint the face being reviewed straight onto the preview, before it is confirmed
+  const st0 = STEPS[step];
+  const shown = st0 && st0.xform === 'rot180' ? vals.slice().reverse() : vals;
+  const f = st0 && st0.face;
+  const el = modelRead && f && document.querySelector('.f3-' + f);   // only once colours are real
+  if(el) [...el.querySelectorAll('i')].forEach((c,i)=>{ c.style.background = COLOURS[shown[i]]; });
+  $('swwrap').hidden = !modelRead;
+  /* Show the squares in the SAME visual order as the mirrored preview.
+     They were rendered in raw order while the preview was mirrored, so every square sat
+     opposite the sticker it represented — and correcting them by eye against the preview
+     introduced errors instead of fixing them. the maintainer found this 2026-09-14 after repeatedly
+     "correcting" readings that were already right.
+     data-i keeps the TRUE index, so the stored value is unaffected by how it is displayed. */
+  const mirroredView = $('mirror').checked;
+  const order = mirroredView ? [1,0,3,2] : [0,1,2,3];
+  $('swatches').innerHTML = order.map(i => {
+    const c = vals[i];
+    return `<button class="sw" data-i="${i}" style="background:${COLOURS[c]}" title="${cname(c)}"><small>${cname(c)}</small></button>`;
+  }).join('');
+  $('retake').disabled = false;
+}
+
+function validate(){
+  const tally = {}; ORDER.forEach(c=>tally[c]=0);
+  Object.values(captured).flat().forEach(c=>tally[c]++);
+  const wrong = ORDER.filter(c=>tally[c]!==4);
+  return {tally, wrong, ok: wrong.length===0};
+}
+
+// The renderer names colours by the face they start on: U white, D yellow, F red,
+// B blue, R green, L orange. Translate our capture into its vocabulary.
+const TO_RENDERER = {W:'U', Y:'D', R:'F', B:'R', G:'L', O:'B'};   // LAB (D2): real scheme — blue right, green left, orange back
+
+$('build').addEventListener('click', ()=>{
+  const faces = {};
+  STEPS.forEach(s=>{
+    const got = captured[s.face];
+    if(got) faces[s.face] = got.map(c=>TO_RENDERER[c]);
+  });
+  try{
+    localStorage.setItem('cube-scan-cube', JSON.stringify(faces));
+    localStorage.setItem('cube-scan-version', '2026-09-14-lr-fixed');
+    goTop('./index.html');
+  }catch(err){
+    msg('err','Could not hand the cube over','<p><code>'+err.message+'</code></p>');
+  }
+});
+
+/* Auto-capture. Watches the target box and fires once the four squares read the same for
+   a moment AND each square is reasonably flat in colour. Holding a cube steady enough to
+   press a button is fiddly; holding it steady is not. */
+let autoTimer = null, stableRun = 0, lastReading = '';
+/* After a capture is confirmed the cube is usually still showing the SAME face — the user
+   has not turned it yet. Without this guard autoTick sees a stable reading and immediately
+   fires again, capturing face 1 as capture 2 and racing through the flow on one face.
+   So auto-capture disarms after every capture and only re-arms once the view has actually
+   changed away from what was just captured. */
+let armed = true, justCaptured = '';
+function squaresLookFlat(){
+  // Uses lastRaw, so it is measured on exactly the pixels that were sampled — it cannot
+  // drift out of step with sampleFromVideo the way a second copy of the geometry did.
+  if(!lastRaw) return false;
+  return lastRaw.every(c => (c[0]+c[1]+c[2]) > 24);   // not essentially black / off-frame
+}
+
+function autoTick(){
+  const hint = $('autohint');
+  paintProbes();
+  if(!stream || pending || $('demo').checked || $('capture').disabled){ stableRun=0; return; }
+  let reading;
+  try { reading = sampleFromVideo().join(''); } catch(e){ return; }
+
+  if(!armed){
+    // waiting for the cube to actually be turned
+    if(reading !== justCaptured){ armed = true; stableRun = 0; lastReading = reading; }
+    else { hint.className='autohint'; hint.textContent='Turn the cube as shown above'; return; }
+  }
+
+  if(!squaresLookFlat()){ stableRun=0; hint.className='autohint'; hint.textContent=''; return; }
+  if(reading === lastReading) stableRun++; else { stableRun = 0; lastReading = reading; }
+
+  if(stableRun >= 5){
+    stableRun = 0; armed = false; justCaptured = reading;
+    hint.className='autohint ready'; hint.textContent='✓ captured';
+    showSwatches(reading.split(''));
+        return;
+  }
+  hint.className='autohint';
+  hint.textContent = stableRun >= 3 ? 'Holding steady…' : '';
+}
+
+$('auto').addEventListener('change', ()=>{
+  clearInterval(autoTimer); autoTimer = null; stableRun = 0;
+  // Probes keep updating even with auto-capture off — seeing what is sampled matters more.
+  if(stream) autoTimer = setInterval($('auto').checked ? autoTick : paintProbes, 220);
+});
+
+/* Show exactly how every sticker was read: the pixels sampled, the hue/saturation those
+   give, and what each classifier made of it. Without this the colour step is a black box —
+   you can see it is wrong but not why, or which rule to change. */
+$('inspect').addEventListener('click', ()=>{
+  // Include the capture currently on screen but not yet confirmed. rawByFace is only
+  // written when a capture is CONFIRMED, so pressing this straight after an auto-capture
+  // used to say "no readings" while the pixels were sitting right there in lastRaw.
+  const live = {};
+  Object.assign(live, rawByFace);
+  if(lastRaw && STEPS[step]) live['(current) ' + STEPS[step].face] = lastRaw;
+
+  if(Object.keys(live).length === 0){
+    const insp0 = $('inspector');
+    insp0.hidden = false;
+    insp0.className = 'msg warn';
+    insp0.innerHTML = '<h4>No camera readings yet</h4>' +
+      '<p>This shows the actual pixels behind every colour decision, so it needs captures ' +
+      'taken with the <b>camera on</b> — demo mode invents colours and has no pixels to show.</p>' +
+      '<p style="margin-bottom:0">Turn the camera on, capture at least one face, then press this again.</p>';
+    insp0.scrollIntoView({behavior:'smooth', block:'nearest'});
+    return;
+  }
+  const faces = Object.keys(live);
+  const rows = [];
+  const all = [];
+  faces.forEach(f => {
+    const raw = live[f];
+    if(!raw) return;
+    const key = f.replace('(current) ','');
+    raw.forEach((rgb,i) => {
+      const [h,sat,v] = rgb2hsv(rgb[0],rgb[1],rgb[2]);
+      const naive = classify(rgb[0],rgb[1],rgb[2]);
+      const final = (captured[key]||[])[i] || (pending ? pending[i] : '?');
+      all.push({f,i,h,sat,v});
+      rows.push(
+        '<tr class="' + (naive!==final ? 'bad' : '') + '">' +
+        '<td>' + f + ':' + i + '</td>' +
+        '<td><span class="chip" style="background:rgb(' + rgb.map(Math.round).join(',') + ')"></span></td>' +
+        '<td>' + rgb.map(x=>Math.round(x)).join(',') + '</td>' +
+        '<td>h' + Math.round(h) + '</td>' +
+        '<td>s' + Math.round(sat*100) + '%</td>' +
+        '<td>v' + Math.round(v*100) + '%</td>' +
+        '<td>' + NAMES[naive] + '</td>' +
+        '<td><span class="chip" style="background:' + (COLOURS[final]||'#888') + '"></span> ' + (NAMES[final]||'?') + '</td>' +
+        '</tr>');
+    });
+  });
+
+  // how the calibration split things, so the grouping itself is inspectable
+  let grp = '';
+  if(Object.keys(rawByFace).length === 6 && all.length >= 24){
+    const bySat = [...all].sort((a,b)=>a.sat-b.sat);
+    const whites = bySat.slice(0,4), nonWhite = bySat.slice(4);
+    grp += 'white group  sat ' + whites.map(x=>Math.round(x.sat*100)).join(',') + '%' +
+           '  · next lowest is ' + Math.round(nonWhite[0].sat*100) + '%' +
+           (nonWhite[0].sat - whites[3].sat < 0.08 ? '  ⚠ narrow margin' : '  ✓ clear margin') + '<br>';
+    const rest = all.filter(x=>!whites.includes(x)).sort((a,b)=>a.h-b.h);
+    let gap=-1,gapAt=0;
+    for(let k=0;k<rest.length;k++){
+      const d=(rest[(k+1)%rest.length].h-rest[k].h+360)%360;
+      if(d>gap){gap=d;gapAt=(k+1)%rest.length;}
+    }
+    const ordered = rest.slice(gapAt).concat(rest.slice(0,gapAt));
+    for(let k=0;k<5;k++){
+      const g = ordered.slice(k*4,(k+1)*4);
+      if(!g.length) continue;
+      const hs = g.map(x=>Math.round(x.h));
+      const spread = Math.max(...hs)-Math.min(...hs);
+      grp += 'group ' + (k+1) + '  hues ' + hs.join(',') +
+             '  spread ' + spread + '°' + (spread > 40 ? '  ⚠ wide — may straddle two colours' : '') + '<br>';
+    }
+  }
+
+  const insp = $('inspector');
+  insp.hidden = false;
+  insp.className = 'msg warn';
+  insp.innerHTML =
+    '<h4>How each sticker was read</h4>' +
+    '<p>Rows highlighted red are where calibration disagreed with the simple per-sticker guess. ' +
+    'Rows marked <b>(current)</b> are the capture on screen now, not yet confirmed. ' +
+    'The grouping summary appears once all six faces are confirmed.</p>' +
+    '<table><tr><th>where</th><th></th><th>rgb</th><th>hue</th><th>sat</th><th>val</th>' +
+    '<th>naive guess</th><th>final</th></tr>' + rows.join('') + '</table>' +
+    (grp ? '<div class="grp"><b>How calibration grouped them</b><br>' + grp + '</div>' : '');
+  insp.scrollIntoView({behavior:'smooth', block:'nearest'});
+});
+
+$('balance').addEventListener('click', ()=>{
+  const assign = autoBalance();
+  if(!assign){
+    msg('warn','Nothing to calibrate',
+        '<p>Calibration needs the raw camera readings, so it only works on faces captured ' +
+        'with the camera on — not demo mode.</p>');
+    return;
+  }
+  renderNet();
+  msg('good','Colours recalibrated',
+      '<p>All 24 stickers were sorted against each other rather than against fixed values: ' +
+      'the four least colourful became white, and the rest fell into five groups of four by ' +
+      'hue.</p><p style="margin-bottom:0">Check the net — anything still wrong can be tapped ' +
+      'to fix, then press Build.</p>');
+});
+
+$('finish').addEventListener('click', ()=>{
+  const {tally, wrong, ok} = validate();
+  const state = STEPS.map(s=>s.face + ':' + (captured[s.face]||[]).join('')).join('  ');
+  const counts = ORDER.map(c=>
+    `<span><i class="k" style="background:${COLOURS[c]}"></i>${NAMES[c]} ×${tally[c]}</span>`).join('');
+  const r = $('result');
+  r.hidden = false;
+  r.className = 'msg ' + (ok ? 'good' : 'err');
+  r.innerHTML = ok
+    ? '<h4>✓ Cube captured — this is a valid 2×2</h4>' +
+      '<p>Every colour appears exactly four times, so what you scanned could be a real cube.</p>' +
+      `<div class="tally">${counts}</div><div class="state">${state}</div>` +
+      '<p style="margin-bottom:0">Press <b>Build this cube</b> to draw it on the real 3D cube ' +
+      'and see whether it matches the one in your hand.</p>'
+    : '<h4>⚠ This cannot be a real cube yet</h4>' +
+      `<p>These colours are miscounted: <b>${wrong.map(c=>`${NAMES[c]} ×${tally[c]}`).join(', ')}</b>. ` +
+      'Each colour must appear exactly four times.</p>' +
+      `<div class="tally">${counts}</div>` +
+      '<p style="margin-bottom:0">Click the faces in the net to go back and fix the squares that were ' +
+      'read wrong — most likely red vs orange, or white vs yellow.</p>';
+  r.scrollIntoView({behavior:'smooth', block:'nearest'});
+});
+
+$('net').addEventListener('click', e=>{
+  const box = e.target.closest('.facebox'); if(!box) return;
+  const face = box.dataset.face;
+  if(!captured[face]) return;                       // nothing there yet
+  if(pending) return;                               // finish the current capture first
+  const idx = STEPS.findIndex((s,i)=> s.face===face && shots[i] !== undefined);
+  if(idx < 0) return;
+  step = idx; pending = null;
+  $('capture').disabled = false;
+  renderStep();
+});
+
+$('back').addEventListener('click', ()=>{
+  if(step === 0) return;
+  step--; pending = null;
+  $('capture').disabled = false;
+  renderStep();
+});
+
+// The per-face rotate/flip controls were removed 2026-09-15. They existed to work around
+// the mirrored-display bug; with the preview, probes and swatches all in the same space
+// there is nothing left for them to correct, and they were four more ways to break a good
+// scan. Tapping an individual square still fixes a single misread colour.
+
+$('swatches').addEventListener('click', e=>{
+  const btn = e.target.closest('.sw'); if(!btn) return;
+  const i = +btn.dataset.i;
+  pending[i] = ORDER[(ORDER.indexOf(pending[i])+1)%ORDER.length];
+  btn.style.background = COLOURS[pending[i]];   // btn already carries the true data-i
+  btn.querySelector('small').textContent = cname(pending[i]);
+  const f = STEPS[step] && STEPS[step].face;
+  const el = modelRead && f && document.querySelector('.f3-' + f);
+  if(el){ const cell = el.querySelectorAll('i')[i]; if(cell) cell.style.background = COLOURS[pending[i]]; }
+});
+
+function doCapture(){
+  {                                  // one press: take the photograph and move on
+    const st = STEPS[step];
+    /* A photo taken AFTER the colours were read makes that reading stale. the assistantt it, go back
+       to ticks, and read again once every photo is in — never show a cube half old, half new. */
+    const wasRead = !!modelRead;
+    if(wasRead){ modelRead = null; captured = {}; flipH = false; flipV = false; $('result').hidden = true; }
+    shots[step] = pending.slice();          // raw, exactly as the camera saw it
+    // Two forward tips is a 180° roll, so the back face arrives upside down. Verified:
+    // U (1 tip), D (3 tips) and F (4 tips) come up correctly; only the 2-tip face is
+    // rotated. Store the CORRECTED reading, or this overwrites the good B from ring 1
+    // with a flipped one and quietly corrupts the cube.
+    const oriented = st.xform === 'rot180' ? pending.slice().reverse() : pending.slice();
+    captured[st.face] = oriented;
+    /* Keep the photograph itself — this is what actually gets read at the end.
+       bestPhoto() is async (three frames, ~110ms) and `step` advances below before it
+       resolves, so the index MUST be captured now. Writing photos[step] from inside the
+       callback put every photograph in the next slot and left slot 1 empty. */
+    const shotIdx = step;
+    const stNow = st;
+    bestPhoto().then(b64=>{
+      if(!b64) return;
+      photos[shotIdx] = b64;
+      renderShots();
+      /* and only now is there a photograph to check against */
+      if(stNow.check !== undefined && photos[stNow.check] !== undefined) ringCheck(stNow, shotIdx);
+      if(wasRead && STEPS.every((_,i)=>photos[i] !== undefined)) setTimeout(readAllPhotos, 300);
+    });
+    if(lastRaw){ rawByFace[st.face] = lastRaw; lastRaw = null; }
+    pending = null;
+    armed = false; justCaptured = shots[step].join('');   // require a turn before re-firing
+    const ah = $('autohint'); if(ah){ ah.className='autohint'; ah.textContent=''; }
+
+    // Ring check: a repeat of an earlier face must read the same. If it does not, the
+    // turning or the reading drifted — say so NOW rather than letting it reach the cube.
+    if(false && st.check !== undefined && shots[st.check]){   // HSV ring check retired 2026-09-15: the reader checks the photographs
+      /* the model check is fired from the photo callback above, once the photograph
+         actually exists — on a timer it raced the thing it was meant to compare */
+      const ref = STEPS[st.check];
+      const refOriented = ref.xform === 'rot180' ? shots[st.check].slice().reverse() : shots[st.check];
+      const a = refOriented.join(''), b = oriented.join('');
+      if(a === b){
+        msg('good','✓ Matches your earlier reading',
+            '<p>Capture ' + (step+1) + ' agrees with capture ' + (st.check+1) +
+            (st.xform === 'rot180' ? ' once the upside-down view is turned back' : '') +
+            '. The turning and the colour reading agree.</p>');
+      } else {
+        msg('err','✗ This does not match capture ' + (st.check+1),
+            '<p>These two readings should agree' +
+            (st.xform === 'rot180' ? ' (this one is seen upside down, so I turned it back before comparing)' : '') +
+            '.</p><p>Earlier: <code>' + a + '</code><br>Now: <code>' + b + '</code></p>' +
+            '<p style="margin-bottom:0">Either a turn went the wrong way, or a colour was misread. ' +
+            'Click the faces in the net to check them — do not build until this agrees.</p>');
+      }
+    }
+    // Advance by STEP INDEX, not by face. The flow deliberately revisits F and B so the
+    // ring checks can compare them; skipping "already captured" faces silently dropped the
+    // checks and then dead-ended after 6 of 10 captures with every button still hidden.
+    const next = STEPS.findIndex((_,i) => shots[i] === undefined);
+    if(step + 1 < STEPS.length){ step = step + 1; renderStep(); }
+    else if(next >= 0){ step = next; renderStep(); }
+    else {
+      renderNet();
+      $('swwrap').hidden = true;
+      $('capture').disabled = true;
+      clearInterval(autoTimer); autoTimer = null;
+      $('instruction').textContent = t('All eight captures done','八张都拍好了');
+      $('hint').textContent = t('Reading the colours…','正在辨识颜色…');
+      setTimeout(readAllPhotos, 400);      // let the last photograph finish being taken
+    }
+    return;
+  }
+}
+
+/* ONE press per face. The second press used to exist so you could approve the colours this
+   page had read; now the colours come from the photographs at the end, so approving a reading
+   we are about to discard only added a press and some confusion. Retake still redoes a face. */
+$('capture').addEventListener('click', ()=>{
+  if(!pending){
+    pending = ($('demo').checked || !stream) ? DEMO[STEPS[step].face] : sampleFromVideo();
+    showSwatches(pending);
+  }
+  doCapture();
+});
+
+
+/* Space is the shutter. The child lines the cube up and says when — nothing is timed,
+   nothing is guessed, and there is no rhythm for him to get wrong. */
+addEventListener('keydown', e=>{
+  if(e.code !== 'Space' && e.key !== ' ') return;
+  const tag = (e.target && e.target.tagName) || '';
+  if(tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+  const b = $('capture');
+  if(!b || b.disabled || b.hidden) return;
+  e.preventDefault();
+  b.click();
+});
+
+$('retake').addEventListener('click', ()=>{ pending=null; renderStep(); });
+$('restart').addEventListener('click', ()=>{
+  // Also drop the SAVED scan. Keeping it caused a real problem: a scan captured under an
+  // older left/right convention survived a code fix and then got corrected twice.
+  try { localStorage.removeItem('cube-scan-last'); localStorage.removeItem('cube-scan-cube'); } catch(e){}
+  step=0; captured={}; pending=null; rawByFace={}; lastRaw=null; shots={}; photos={}; modelRead=null; flipH=false; flipV=false; $('fliphint').textContent=''; armed=true; justCaptured=''; stableRun=0; lastReading=''; DEMO=demoCube(); $('capture').disabled=false; $('result').hidden=true; renderStep(); });
+
+
+/* ==================================================================
+   PHOTOGRAPHS, AND WHO READS THEM
+   Everything that went wrong before came from INFERRING something the child can
+   simply tell us. Here he says when (space bar) and the step says which face, so
+   there is no segmentation, no motion tracking and no turn direction to get wrong.
+   All that is left is colour, which is the part a vision model is good at and the
+   part our own HSV reader gets wrong under warm light.
+   ================================================================== */
+let photos = {};                 // step index -> jpeg data (base64, no prefix)
+let modelRead = null;            // what the model said, per step index
+const PHOTO_PX = 256;
+
+/* Pressing the key nudges the cube and the laptop, so the frame at the instant of the
+   press is often the blurriest one around. Take a few and keep the sharpest. */
+function grabPhoto(){
+  const v = $('video');
+  if(!v || !v.videoWidth) return null;
+  const rect = v.getBoundingClientRect();
+  const Wd = rect.width, Hd = rect.height, Wv = v.videoWidth, Hv = v.videoHeight;
+  const scale = Math.max(Wd/Wv, Hd/Hv);
+  const offX = (Wd - Wv*scale)/2, offY = (Hd - Hv*scale)/2;
+  const sideD = Wd * (boxPct/100) * 1.15;          // a little wider than the sampling box
+  const bx = ((Wd - sideD)/2 - offX)/scale, by = ((Hd - sideD)/2 - offY)/scale;
+  const bs = sideD/scale;
+  const c = document.createElement('canvas');
+  c.width = c.height = PHOTO_PX;
+  const cx = c.getContext('2d');
+  /* THE PHOTOGRAPH MUST MATCH WHAT THE PERSON IS LOOKING AT.
+     The preview is mirrored so it behaves like a looking-glass and the cube is easy to line
+     up. If we then keep the RAW frame, the picture we read is the opposite way round from
+     the one he just judged as correct — and every instinct he has about it is inverted.
+     That exact mismatch cost an entire evening once already: the maintainer kept "correcting" readings
+     that were right, because he was correcting them against a mirrored preview.
+     So mirror the capture whenever the preview is mirrored. Which way round the cube really
+     is gets settled afterwards by corner handedness, which cannot be fooled either way. */
+  /* Keep the RAW frame. The mirror is dealt with in exactly one place — the instruction
+     given to the reader — because two places that each half-flip is how we ended up with a
+     cube that was neither one thing nor the other. */
+  cx.drawImage(v, bx, by, bs, bs, 0, 0, PHOTO_PX, PHOTO_PX);   // the photo is kept exactly as taken
+  return c;
+}
+function sharpness(canvas){
+  // gradient energy on a small grey copy: a blurred frame has little of it
+  const n = 64;
+  const g = document.createElement('canvas'); g.width = g.height = n;
+  const gx = g.getContext('2d'); gx.drawImage(canvas, 0, 0, n, n);
+  const d = gx.getImageData(0,0,n,n).data;
+  let e = 0;
+  for(let y=0;y<n;y++) for(let x=1;x<n;x++){
+    const a=(y*n+x)*4, b=(y*n+x-1)*4;
+    e += Math.abs((d[a]*0.3+d[a+1]*0.59+d[a+2]*0.11) - (d[b]*0.3+d[b+1]*0.59+d[b+2]*0.11));
+  }
+  return e;
+}
+async function bestPhoto(){
+  let best = null, bestScore = -1;
+  for(let i=0;i<3;i++){
+    const c = grabPhoto();
+    if(c){
+      const sc = sharpness(c);
+      if(sc > bestScore){ bestScore = sc; best = c; }
+    }
+    if(i < 2) await new Promise(r=>setTimeout(r, 55));
+  }
+  return best ? best.toDataURL('image/jpeg', 0.85).split(',')[1] : null;
+}
+
+/* Lay the photographs out as ONE image. Nine separate pictures cost 10,066 prompt tokens
+   and about 4 seconds; the same nine as a single grid cost 1,354 and 1.6 seconds, with an
+   identical reading. Measured, five runs, correct every time. */
+function gridOf(list){
+  const n = list.length, cols = Math.ceil(Math.sqrt(n)), rows = Math.ceil(n/cols);
+  const c = document.createElement('canvas');
+  c.width = cols*PHOTO_PX; c.height = rows*PHOTO_PX;
+  const cx = c.getContext('2d');
+  cx.fillStyle = '#111'; cx.fillRect(0,0,c.width,c.height);
+  return Promise.all(list.map((b64,i)=>new Promise(res=>{
+    const im = new Image();
+    im.onload = ()=>{
+      /* LAB 2026-09-15 (the maintainer): when "The camera defaults to mirror" is ticked, each photo is
+         mirrored HERE, only as it is sent to the reader. The stored photos and thumbnails stay
+         exactly as taken. Nothing else changes. */
+      const x0 = (i%cols)*PHOTO_PX, y0 = Math.floor(i/cols)*PHOTO_PX;
+      if(mirrorCap){ cx.save(); cx.translate(x0 + PHOTO_PX, y0); cx.scale(-1, 1); cx.drawImage(im, 0, 0, PHOTO_PX, PHOTO_PX); cx.restore(); }
+      else cx.drawImage(im, x0, y0, PHOTO_PX, PHOTO_PX);
+      res(); };
+    im.onerror = res;
+    im.src = 'data:image/jpeg;base64,' + b64;
+  }))).then(()=>({ b64: c.toDataURL('image/jpeg', 0.85).split(',')[1], cols, rows }));
+}
+
+async function askColours(list, promptKind){
+  const g = await gridOf(list);
+  /* the maintainer's idea, and better than anything I tried: if the picture is a mirror image, SAY SO
+     and let the reader account for it. Flipping its answer afterwards meant guessing which
+     flip — columns? faces? both? — and I guessed wrong three times running. Verified: told
+     that the camera mirrors, it returned the exact left-right flip on 9 photographs out of 9. */
+  /* LAB 2026-09-15 (the maintainer): the reader is never told the photo is mirrored. The ONLY mirror in the
+     chain is the "camera defaults to mirror" tick, applied to the image in gridOf(). */
+  const mirrored = false;
+  const r = await fetch('/api/colours', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ images:[g.b64], grid:{cols:g.cols, rows:g.rows, count:list.length},
+                           kind: promptKind || 'faces', mirrored })
+  });
+  const j = await r.json();
+  if(!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status));
+  if(!j.reads || j.reads.length !== list.length)
+    throw new Error('asked about ' + list.length + ' photos, got ' + (j.reads||[]).length);
+  return j;
+}
+
+
+/* the photographs so far, down the side, so he can see what was actually taken */
+function renderShots(){
+  const host = $('shotstrip');
+  if(!host) return;
+  const n = STEPS.length;
+  let h = '';
+  for(let i=0;i<n;i++){
+    const done = photos[i];
+    /* Show what was READ from this exact photograph, right under it. Comparing a photograph
+       against the net does not work: the net stores every face in a fixed orientation, so a
+       perfectly correct cube still will not match the photographs tile for tile. Putting the
+       reading beside its own photograph is the only comparison that means anything — if these
+       two disagree the COLOUR was misread; if they agree but the cube looks wrong, the reading
+       was placed on the wrong face. Two completely different faults. */
+    const r = modelRead && modelRead[i];
+    const sw = r ? '<div class="rd dbg">' + r.map(c=>'<i style="background:' + COLOURS[c] + '"></i>').join('') + '</div>' : '';
+    h += '<figure class="shot' + (done ? '' : ' empty') + (i===step ? ' now' : '') + '">' +
+         (done ? '<img src="data:image/jpeg;base64,' + done + '" alt="capture ' + (i+1) + '">'
+               : '<span></span>') + sw +
+         '<figcaption>' + (i+1) + (r ? '<span class="dbg"> &middot; ' + STEPS[i].face + '</span>' : '') + '</figcaption></figure>';
+  }
+  host.innerHTML = h;
+  const got = Object.keys(photos).length;
+  const c = $('shotcount');
+  if(c) c.textContent = got + t(' of ', ' / ') + n + t(' photos', ' 张照片');
+}
+
+/* The ring check, done properly: send the earlier photograph and this one to the reader
+   that is actually going to build the cube. Comparing our own HSV readings only ever
+   checked numbers we were about to throw away. */
+async function ringCheck(st, shotIdx){
+  if(photos[shotIdx] === undefined || photos[st.check] === undefined) return;
+  msg('info', t('Checking this against capture ','正在和第 ') + (st.check+1) + t('…','张比对…'),
+      '<p>' + t('One moment.','稍等一下。') + '</p>');
+  try{
+    const j = await askColours([photos[st.check], photos[shotIdx]], 'pair');
+    let a = j.reads[0], b = j.reads[1];
+    if(STEPS[st.check].xform === 'rot180') a = a.slice().reverse();
+    if(st.xform === 'rot180')              b = b.slice().reverse();
+    const sa = a.join(''), sb = b.join('');
+    if(sa === sb){
+      msg('good', t('✓ That matches capture ','✓ 和第 ') + (st.check+1) + t('','张一致'),
+          '<p>' + t('Both times it read the same. Your turning is going the right way.',
+                    '两次读到的颜色一样，说明你转的方向是对的。') + '</p>');
+    } else {
+      const diff = [];
+      for(let i=0;i<4;i++) if(a[i] !== b[i]) diff.push(i+1);
+      msg('err', t('✗ This does not match capture ','✗ 和第 ') + (st.check+1) + t('','张对不上'),
+          '<p>' + t('Square','第') + ' ' + diff.join(', ') + ' ' +
+          t('read differently this time.','个格子这次读到的颜色不一样。') + '</p>' +
+          '<p>' + t('Earlier','之前') + ': <code>' + sa + '</code><br>' +
+          t('Now','现在') + ': <code>' + sb + '</code></p>' +
+          '<p style="margin-bottom:0">' +
+          t('Most likely a turn went the wrong way. Press Back and try that turn again.',
+            '很可能有一次转错方向了。按「上一步」，把那一次重新转一遍。') + '</p>');
+    }
+  }catch(err){
+    msg('warn', t('Could not check that one','这次没能比对'),
+        '<p class="dbg"><code>' + err.message + '</code></p><p>' +
+        t('Carry on — everything is checked again at the end.',
+          '先继续，最后还会整体检查一次。') + '</p>');
+  }
+}
+
+/* All eight taken: one grid, one call, and the colours we actually build from. */
+async function readAllPhotos(){
+  const idx = STEPS.map((_,i)=>i).filter(i=>photos[i] !== undefined);
+  if(idx.length < STEPS.length){
+    msg('err', t('Some photographs are missing','有几张照片没拍到'),
+        '<p>' + t('Only ','只拍到 ') + idx.length + t(' of ',' / ') + STEPS.length +
+        t(' were taken. Press Retake on the ones that are blank.',
+          ' 张。空白的那几张请重拍。') + '</p>');
+    return;
+  }
+  $('instruction').textContent = t('Reading the colours…','正在辨识颜色…');
+  $('hint').textContent = t('This takes a moment.','稍等一下。');
+  msg('info', t('Reading the colours…','正在辨识颜色…'), '<p>' +
+      t('All eight photographs, in one go.','八张照片一起看。') + '</p>');
+  try{
+    const j = await askColours(idx.map(i=>photos[i]), 'faces');
+    modelRead = {};
+
+    /* Build it as photographed and as un-mirrored, and keep whichever is a real cube.
+       This is what makes the page work on a camera that mirrors without anyone having
+       to know that it does. */
+    const build = flip => {
+      const f = {};
+      idx.forEach((stepIdx, k)=>{
+        const st = STEPS[stepIdx];
+        const raw = j.reads[k];
+        f[st.face] = st.xform === 'rot180' ? raw.slice().reverse() : raw.slice();
+      });
+      return flip ? mirrorCube(f) : f;
+    };
+    /* THE MAINTAINER, 04:35, holding the cube: the rendered face must be the MIRROR of the
+       photograph, not a copy of it. He is looking at the real cube while he says this, so
+       it is the one piece of ground truth in the room and it settles the default.
+       Every face's reading is therefore turned left-to-right before it is placed.
+       The corner check still runs and still reports, but it no longer overrides him —
+       it had been choosing between two candidates that were BOTH wrong. */
+    /* The reading already accounts for the mirror — nothing to undo here. */
+    const assemble = () => {
+      const f = {};
+      idx.forEach((stepIdx, k)=>{
+        const st = STEPS[stepIdx];
+        const raw = j.reads[k].slice();
+        f[st.face] = st.xform === 'rot180' ? raw.slice().reverse() : raw.slice();
+      });
+      return f;
+    };
+    const chosen = assemble();
+    const badA = cornerFaultsC(chosen).length;
+    const badB = badA;
+    const useFlip = !!(j.meta && j.meta.mirrored);
+
+    /* Put the raw readings somewhere they can be copied. Without this a failure can only be
+       described, and describing a colour reading over a screenshot is how we spent an hour
+       on the wrong theory. */
+    try {
+      const dump = {
+        camera: { mirrorPreview: !!($('mirror')&&$('mirror').checked),
+                  camflip: !!($('camflip')&&$('camflip').checked) },
+        reads: idx.map((stepIdx,k)=>({ capture: stepIdx+1, face: STEPS[stepIdx].face,
+                                       xform: STEPS[stepIdx].xform || null,
+                                       read: j.reads[k].join('') })),
+        badCornersAsShot: badA, badCornersFlipped: badB, chose: useFlip ? 'flipped' : 'as shot',
+        faces: chosen
+      };
+      const box = $('diag');
+      if(box) box.textContent = JSON.stringify(dump, null, 1);
+      window.__cubeDump = dump;
+      console.log('[scan] ' + JSON.stringify(dump));
+    } catch(e){}
+
+    idx.forEach((stepIdx, k)=>{
+      /* the strip shows what was read from the photograph, untouched — mirroring is a
+         statement about the CUBE, not about what the camera saw */
+      shots[stepIdx] = j.reads[k].slice();
+      modelRead[stepIdx] = j.reads[k].slice();
+    });
+    reassemble();               // places every reading by the CURRENT labels (camera + flips)
+    renderShots();
+    const badNow = cornerFaultsC(captured).length;
+    const v = validate();
+    const secs = (j.meta && j.meta.seconds) || '?';
+    if(v.ok && badNow === 0){
+      msg('good', t('Your cube is ready','魔方读好了'),
+          '<p>' + t('Eight sides read in ','八张照片，用了 ') + secs + t(' seconds, every colour adds up and all eight corners are real pieces. Press Build.',
+          ' 秒，六种颜色数量都对，八个角也都是真实存在的块。按「生成魔方」。') + '</p>' +
+          (useFlip ? '<p>' + t('Your camera shows a mirror image, so I turned every reading back the right way round. Nothing for you to do.',
+                               '你的摄像头是镜像的，我已经把每一面都翻回正确方向了，不用管它。') + '</p>' : ''));
+    } else if(v.ok && badNow > 0){
+      msg('err', t('The colours add up, but the cube cannot exist','颜色数量对，但这个魔方不成立'),
+          '<p>' + badNow + t(' corner(s) are not pieces a real cube has.',
+          ' 个角不是真实魔方上会有的块。') + '</p>' +
+          '<p class="dbg" style="font-size:13px">' + t('As photographed: ','按拍到的：') + badA +
+          t(' bad. Mirrored: ','个坏角。镜像后：') + badB +
+          t(' bad. Took the ','个坏角。用了') + (useFlip ? t('mirrored','镜像') : t('as-photographed','原样')) +
+          t(' one.',' 那一个。') + '</p>' +
+          '<p class="dbg" style="margin-bottom:0;font-size:13px">' +
+          t('The full reading is in Advanced settings — send me that and I can tell you exactly which sticker is wrong.',
+            '完整读数在「高级设置」里，把它发给我就能知道是哪一格错了。') + '</p>');
+    } else {
+      msg('err', t('The colours do not add up','颜色数量不对'),
+          '<p>' + v.wrong.map(c=>cname(c) + ' ' + v.tally[c]).join(', ') + '. ' +
+          t('Tap a square in the net to correct it, or retake that photograph.',
+            '可以点一下展开图里的格子改颜色，或者把那一张重拍。') + '</p>');
+    }
+    $('instruction').textContent = t('All eight captures done','八张都拍好了');
+    $('hint').textContent = t('Check the net, then press Build.','看一下展开图，然后按「生成魔方」。');
+  }catch(err){
+    msg('err', t('Could not read the colours','没能辨识颜色'),
+        '<p class="dbg"><code>' + err.message + '</code></p>' +
+        '<p>' + t('Press Start again and take the eight photos once more. If it keeps failing, ask for help.',
+                  '按「重新开始」，把八张照片再拍一次。如果一直不行，找人帮忙。') + '</p>');
+  }
+}
+
+
+/* Place every model reading by the CURRENT labels. This is the only place captured{} is built
+   from the readings, so a camera change or a flip button is one call: no new photos, no reader. */
+function reassemble(){
+  captured = {};
+  if(!modelRead) { renderNet(); return; }
+  STEPS.forEach((st,i)=>{
+    const r = modelRead[i];
+    if(!r) return;
+    captured[st.face] = st.xform === 'rot180' ? r.slice().reverse() : r.slice();
+  });
+  renderNet();
+  flipHint();
+}
+/* D3 (the maintainer): if a flip would turn an impossible cube into a real one, point at the button.
+   Never press it for him. */
+function cubeWith(h, v){
+  const saveH = flipH, saveV = flipV; flipH = h; flipV = v;
+  const f = {};
+  STEPS.forEach((st,i)=>{ const r = modelRead && modelRead[i]; if(r) f[st.face] = st.xform === 'rot180' ? r.slice().reverse() : r.slice(); });
+  flipH = saveH; flipV = saveV;
+  return f;
+}
+function flipHint(){
+  const el = $('fliphint'); if(!el) return;
+  el.textContent = '';
+  if(!modelRead || Object.keys(captured).length < 6) return;
+  if(cornerFaultsC(captured).length === 0) return;
+  const tries = [[!flipH, flipV, t('⇄ Flip sideways','⇄ 左右翻转')],
+                 [flipH, !flipV, t('⇅ Flip up-down','⇅ 上下翻转')],
+                 [!flipH, !flipV, t('both flip buttons','两个翻转按钮')]];
+  for(const [h, v, name] of tries){
+    if(cornerFaultsC(cubeWith(h, v)).length === 0){
+      el.textContent = t('Looks like a turn went the other way — try ','好像有一次转反了——试试 ') + name;
+      return;
+    }
+  }
+}
+$('fliph').addEventListener('click', ()=>{ flipH = !flipH; reassemble(); });
+$('flipv').addEventListener('click', ()=>{ flipV = !flipV; reassemble(); });
+
+/* ==================================================================
+   IS THIS A CUBE THAT COULD EXIST — and is the camera mirroring?
+
+   Some cameras hand back the scene already mirrored (the maintainer's one particular webcam does;
+   the learner's MacBook does not). Following the instructions physically still puts
+   the right FACE in front of the lens, so the face labels stay correct — but
+   every reading comes back with its two columns swapped.
+
+   Counting colours cannot see that: a mirror image still has four of each.
+   Corner handedness can. Mirror a cube and every corner becomes a piece that
+   does not exist — white-red-green going round the other way is not a piece you
+   can pick up. So build it both ways and keep the one that is a real cube.
+   Nobody has to know what their camera does.
+   ================================================================== */
+const OPPOSITE_C = {W:'Y', Y:'W', R:'O', O:'R', G:'B', B:'G'};
+const CORNERS_C = [
+  {p:[-1, 1, 1], X:['L',1], Y:['U',2], Z:['F',0]},
+  {p:[ 1, 1, 1], X:['R',0], Y:['U',3], Z:['F',1]},
+  {p:[-1, 1,-1], X:['L',0], Y:['U',0], Z:['B',1]},
+  {p:[ 1, 1,-1], X:['R',1], Y:['U',1], Z:['B',0]},
+  {p:[-1,-1, 1], X:['L',3], Y:['D',0], Z:['F',2]},
+  {p:[ 1,-1, 1], X:['R',2], Y:['D',1], Z:['F',3]},
+  {p:[-1,-1,-1], X:['L',2], Y:['D',2], Z:['B',3]},
+  {p:[ 1,-1,-1], X:['R',3], Y:['D',3], Z:['B',2]}
+];
+const cycKeyC = t => [[t[0],t[1],t[2]],[t[1],t[2],t[0]],[t[2],t[0],t[1]]].map(r=>r.join('')).sort()[0];
+/* an ordinary shop cube: white up, red front, BLUE right */
+const LEGAL_C = new Set(CORNERS_C.map(({p:[x,y,z]})=>{
+  const cX = x>0?'B':'G', cY = y>0?'W':'Y', cZ = z>0?'R':'O';
+  return cycKeyC(x*y*z>0 ? [cX,cY,cZ] : [cX,cZ,cY]);
+}));
+function cornerFaultsC(faces){
+  const bad = [];
+  for(const c of CORNERS_C){
+    const t = [faces[c.X[0]] && faces[c.X[0]][c.X[1]],
+               faces[c.Y[0]] && faces[c.Y[0]][c.Y[1]],
+               faces[c.Z[0]] && faces[c.Z[0]][c.Z[1]]];
+    if(t.some(x=>!x)) continue;
+    if(new Set(t).size < 3){ bad.push(t); continue; }
+    let opp = false;
+    for(let a=0;a<3;a++) for(let b=a+1;b<3;b++) if(OPPOSITE_C[t[a]]===t[b]) opp = true;
+    if(opp){ bad.push(t); continue; }
+    const [x,y,z] = c.p;
+    if(!LEGAL_C.has(cycKeyC(x*y*z>0 ? [t[0],t[1],t[2]] : [t[0],t[2],t[1]]))) bad.push(t);
+  }
+  return bad;
+}
+const swapCols = r => [r[1], r[0], r[3], r[2]];
+
+/* A TRUE mirror of a cube is not just "swap the columns of each face". Reflecting through a
+   vertical plane also EXCHANGES the left and right faces — the near faces stay put, L and R
+   trade places. Doing only the columns leaves the handedness fault untouched, which is why
+   the maintainer's run reported 8 impossible corners as-photographed AND 8 mirrored: both candidates
+   had the same fault and there was never a right answer among them. */
+function mirrorCube(faces){
+  const out = {};
+  Object.keys(faces).forEach(f=>{
+    const target = f === 'L' ? 'R' : f === 'R' ? 'L' : f;
+    out[target] = swapCols(faces[f]);
+  });
+  return out;
+}
+
+function msg(kind, title, html){
+  const m = $('msg');
+  m.hidden = false; m.className = 'msg ' + kind;
+  m.innerHTML = '<h4>' + title + '</h4>' + html;
+}
+
+function diagnostics(){
+  const secure = window.isSecureContext;
+  const hasApi = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  $('diag').textContent =
+    'page: ' + location.protocol + '//' + location.host +
+    '  ·  secure context: ' + (secure ? 'yes' : 'NO') +
+    '  ·  camera API: ' + (hasApi ? 'present' : 'MISSING') +
+    '  ·  flips: ' + (flipH ? 'H' : '-') + (flipV ? 'V' : '-') +
+    '  ·  mirror capture: ' + (mirrorCap ? 'ON' : 'off') + '  ·  build: oss-1.0';
+  return {secure, hasApi};
+}
+
+/* The camera starts by itself. A "Turn on camera" button was one more thing to explain to
+   a child for no benefit — the page can do nothing useful without it. The browser still asks
+   permission the first time; after that it is silent. */
+/* The secure address for the page the USER is looking at — which, inside a tab, is the tab
+   page, not this one. Sending only the frame to https leaves a secure scanner inside an
+   insecure wrapper, and the browser still refuses the camera. Take the whole page across. */
+function secureUrl(){
+  let loc = location;
+  try { if (window.top && window.top !== window.self && window.top.location.hostname) loc = window.top.location; } catch(e){}
+  return 'https://' + loc.hostname + (loc.port ? ':' + loc.port : '') + loc.pathname + loc.search + loc.hash;
+}
+
+async function startCamera(){
+  const {secure, hasApi} = diagnostics();
+  if(!secure || !hasApi){
+    msg('warn','The browser is blocking the camera',
+      '<p class="dbg">This page is on <code>' + location.protocol + '</code>. Cameras are only allowed on ' +
+      '<code>https://</code> or <code>localhost</code>.</p>' +
+      '<p><a href="' + secureUrl() + '" target="_top" style="font-weight:800">' +
+      'Open this page securely →</a></p>' +
+      '<p style="margin-bottom:0;font-size:13px">Or switch on Demo mode under Advanced settings ' +
+      'to try the flow without a camera.</p>');
+    const cs=$('camstate'); if(cs) cs.textContent='camera blocked';
+    return;
+  }
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({video:{width:1280}});
+    const v=$('video'); v.srcObject=stream; await v.play();
+    v.hidden=false; $('ph').hidden=true; $('demo').checked=false;
+    v.classList.toggle('mirrored', $('mirror').checked);
+    $('stage').classList.toggle('mirrored', $('mirror').checked);
+    const cs=$('camstate'); if(cs) cs.textContent='camera on';
+    clearInterval(autoTimer);
+    autoTimer = setInterval($('auto').checked ? autoTick : paintProbes, 220);
+  }catch(err){
+    msg('err','Could not start the camera',
+      '<p class="dbg"><code>' + err.name + ': ' + err.message + '</code></p>' +
+      '<p style="margin-bottom:0">If you declined the prompt, allow the camera for this site and ' +
+      'reload. Demo mode under Advanced settings still works meanwhile.</p>');
+    const cs=$('camstate'); if(cs) cs.textContent='camera blocked';
+  }
+}
+
+diagnostics();
+
+$('boxsize').addEventListener('input', ()=>{
+  boxPct = +$('boxsize').value;
+  $('boxval').textContent = boxPct + '%';
+  $('target').style.setProperty('--boxpct', boxPct + '%');
+});
+$('target').style.setProperty('--boxpct', boxPct + '%');
+
+function paintProbes(){ /* the circles are gone (2026-09-15); nothing to paint */ }
+
+/* Camera position (2026-09-15). Back camera: no mirrored preview, no mirror note to the reader,
+   L/R labels swapped — the whole set-up is the mirror of the face-camera one, so nothing else
+   changes. Remembered per device. */
+
+/* Debug toggle (2026-09-15): everything technical carries .dbg and is hidden unless this is on. */
+function applyDebug(){
+  document.body.classList.toggle('debug', debugOn);
+  $('dbg').checked = debugOn;
+}
+{ const mc = $('mirrorcap'); if(mc){ mc.checked = mirrorCap; mc.addEventListener('change', ()=>{ mirrorCap = mc.checked; try { localStorage.setItem('scan-mirror-capture', mirrorCap ? '1' : '0'); } catch(e){} }); } }
+$('dbg').addEventListener('change', ()=>{
+  debugOn = $('dbg').checked;
+  try { localStorage.setItem('scan-debug', debugOn ? '1' : '0'); } catch(e){}
+  applyDebug();
+});
+
+$('mirror').addEventListener('change', ()=>{
+  // Display only — captures already taken are unaffected, and so are captures still to come.
+  $('video').classList.toggle('mirrored', $('mirror').checked);
+  $('stage').classList.toggle('mirrored', $('mirror').checked);
+  if(pending) showSwatches(pending);     // keep the squares matching the preview
+});
+
+$('tocube').addEventListener('click', ()=>{ goTop('./index.html'); });
+
+/* Same mechanism as the cube page: data-en/data-zh on static text, and a t() helper for
+   anything JavaScript writes. the learner's whole site is bilingual; a scanner he could only
+   read in English would be the one part of it he cannot use in both languages. */
+$('lang').addEventListener('click', ()=>{
+  lang = lang === 'en' ? 'zh' : 'en';
+  try { localStorage.setItem('cube-lang', lang); } catch(e){}   // shared with the cube page (2026-09-15)
+  document.documentElement.lang = lang === 'en' ? 'en' : 'zh-Hans';
+  document.querySelectorAll('[data-en][data-zh]').forEach(el => { el.textContent = el.dataset[lang]; });
+  $('lang').textContent = lang === 'en' ? '中文' : 'English';
+  $('lang').setAttribute('aria-label', lang === 'en' ? '切换到中文' : 'Switch to English');
+  renderStep();
+  renderNet();
+  renderLegend();
+  flipHint();
+});
+
+function renderLegend(){
+  $('legend').innerHTML = ORDER.map(c=>`<span><i class="k" style="background:${COLOURS[c]}"></i>${cname(c)}</span>`).join('');
+}
+renderLegend();
+applyDebug();
+/* Language carry-over (the maintainer, 2026-09-15): the cube page and this page remember ONE choice in
+   localStorage 'cube-lang'; ?lang=zh also works. Applied by pressing our own button, so every
+   label goes through the same path as a real click. */
+try {
+  const want = new URLSearchParams(location.search).get('lang') || localStorage.getItem('cube-lang');
+  if (want === 'zh' && lang === 'en') $('lang').click();
+} catch(e){}
+renderStep();
+startCamera();
+</script>
+</body>
+</html>
