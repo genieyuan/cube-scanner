@@ -1,0 +1,36 @@
+flowchart LR
+  subgraph Capture[Browser capture]
+    Camera["Camera<br/>getUserMedia · HTTPS"]
+    Guided["Guided capture<br/>8 photos · space bar shutter<br/>sharpest of 3 frames<br/>optional mirror-at-send"]
+    Grid["Photo grid<br/>one JPEG · 8 tiles"]
+    Camera --> Guided --> Grid
+  end
+
+  subgraph Server[Server side]
+    Reader["Colour reader server<br/>Python stdlib http.server<br/>API key stays here"]
+    Vision["Vision model API<br/>reads 4 letters per tile"]
+    Reader --> Vision
+  end
+
+  subgraph Assembly[Browser assembly]
+    Assembler["Assembler<br/>step table: photo to face<br/>back face rot180<br/>flip L/R or U/D"]
+    Legal["Legality check<br/>8 real corners<br/>4 of each colour"]
+    Store["localStorage hand-off<br/>{face: [4 colours]}"]
+    Cube["Any 3D cube page<br/>applyScan()"]
+    Assembler --> Legal --> Store --> Cube
+  end
+
+  Grid -->|"POST /api/colours"| Reader
+  Vision -->|"4 letters per tile"| Assembler
+  CaptureNote["Capture UX<br/>pair prompts after photos 5 and 7<br/>ticks only until reader returns<br/>bilingual UI"] -.-> Guided
+
+  classDef input fill:#eef2f5,stroke:#7b8798,color:#18202b
+  classDef focal fill:#fff3ed,stroke:#e66832,color:#18202b,stroke-width:2px
+  classDef backend fill:#ffffff,stroke:#334155,color:#18202b
+  classDef store fill:#eef1f4,stroke:#647184,color:#18202b
+  classDef note fill:#ffffff,stroke:#9aa5b3,color:#4f5d70,stroke-dasharray:4 4
+  class Camera input
+  class Guided,Assembler focal
+  class Grid,Reader,Vision,Legal,Cube backend
+  class Store store
+  class CaptureNote note

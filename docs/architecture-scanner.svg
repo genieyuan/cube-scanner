@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="architecture-scanner-title architecture-scanner-desc">
+  <title id="architecture-scanner-title">2x2 Cube Scanner</title>
+  <desc id="architecture-scanner-desc">Architecture and data flow for guided browser capture, server-side colour reading, cube legality checks, and local browser hand-off.</desc>
+  <defs>
+    <style>
+      .title{font:700 32px -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;fill:#18202b}
+      .subtitle{font:400 12px -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;fill:#647184}
+      .zone-label,.tag,.edge-label,.legend{font:600 8px ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:1.2px}
+      .node-title{font:700 16px -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;fill:#18202b}
+      .body{font:400 12px -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;fill:#4f5d70}
+      .code{font:500 12px ui-monospace,SFMono-Regular,Consolas,monospace;fill:#405069}
+      .note{font:500 12px -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;fill:#536176}
+      .node{fill:#fff;stroke:#334155;stroke-width:1.2}
+      .input{fill:#eef2f5;stroke:#7b8798;stroke-width:1.2}
+      .external{fill:#f1f4f8;stroke:#758399;stroke-width:1.2;stroke-dasharray:4 4}
+      .focal{fill:#fff3ed;stroke:#e66832;stroke-width:1.6}
+      .store{fill:#eef1f4;stroke:#647184;stroke-width:1.2}
+      .zone{fill:#eef1f4;fill-opacity:.42;stroke:#bcc4cf;stroke-width:1;stroke-dasharray:4 4}
+      .arrow{fill:none;stroke:#647184;stroke-width:1.6;marker-end:url(#arrow)}
+      .arrow-link{fill:none;stroke:#2e63a5;stroke-width:1.8;marker-end:url(#arrow-link)}
+      .arrow-accent{fill:none;stroke:#e66832;stroke-width:1.8;marker-end:url(#arrow-accent)}
+    </style>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,4 L0,8 Z" fill="#647184"/></marker>
+    <marker id="arrow-link" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,4 L0,8 Z" fill="#2e63a5"/></marker>
+    <marker id="arrow-accent" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,4 L0,8 Z" fill="#e66832"/></marker>
+  </defs>
+
+  <rect width="1200" height="720" fill="#f7f7f4"/>
+  <text x="40" y="52" class="title">2x2 Cube Scanner</text>
+  <text x="40" y="80" class="subtitle">Browser capture → server-side colour reading → verified local hand-off</text>
+
+  <!-- Zones -->
+  <rect x="24" y="112" width="688" height="232" rx="8" class="zone"/>
+  <rect x="40" y="120" width="128" height="16" rx="2" fill="#f7f7f4"/>
+  <text x="48" y="132" class="zone-label" fill="#6f7b8d">BROWSER CAPTURE</text>
+  <rect x="720" y="112" width="464" height="232" rx="8" class="zone"/>
+  <rect x="736" y="120" width="96" height="16" rx="2" fill="#f7f7f4"/>
+  <text x="744" y="132" class="zone-label" fill="#6f7b8d">SERVER SIDE</text>
+  <rect x="248" y="376" width="936" height="208" rx="8" class="zone"/>
+  <rect x="264" y="384" width="152" height="16" rx="2" fill="#f7f7f4"/>
+  <text x="272" y="396" class="zone-label" fill="#6f7b8d">BROWSER ASSEMBLY</text>
+
+  <!-- Directed flow: arrows are drawn before nodes -->
+  <line x1="240" y1="224" x2="272" y2="224" class="arrow"/>
+  <line x1="472" y1="224" x2="504" y2="224" class="arrow"/>
+  <line x1="704" y1="224" x2="736" y2="224" class="arrow-link"/>
+  <line x1="936" y1="224" x2="968" y2="224" class="arrow-link"/>
+  <line x1="1068" y1="284" x2="1068" y2="400" class="arrow-accent"/>
+  <rect x="1080" y="324" width="104" height="24" rx="2" fill="#f7f7f4"/>
+  <text x="1132" y="340" text-anchor="middle" class="edge-label" fill="#d35d2d">4 LETTERS / TILE</text>
+  <line x1="968" y1="480" x2="936" y2="480" class="arrow"/>
+  <line x1="736" y1="480" x2="704" y2="480" class="arrow"/>
+  <line x1="504" y1="480" x2="472" y2="480" class="arrow-accent"/>
+
+  <!-- Browser capture -->
+  <rect x="40" y="164" width="200" height="120" rx="8" class="input"/>
+  <text x="56" y="184" class="tag" fill="#708096">INPUT</text>
+  <text x="140" y="216" text-anchor="middle" class="node-title">Camera</text>
+  <text x="140" y="240" text-anchor="middle" class="code">getUserMedia()</text>
+  <text x="140" y="260" text-anchor="middle" class="body">HTTPS required</text>
+
+  <rect x="272" y="144" width="200" height="160" rx="8" class="focal"/>
+  <text x="288" y="164" class="tag" fill="#c45429">CAPTURE</text>
+  <text x="372" y="192" text-anchor="middle" class="node-title">Guided capture</text>
+  <text x="372" y="216" text-anchor="middle" class="body">8 photos</text>
+  <text x="372" y="236" text-anchor="middle" class="body">space bar shutter</text>
+  <text x="372" y="256" text-anchor="middle" class="body">sharpest of 3 frames</text>
+  <text x="372" y="276" text-anchor="middle" class="body">optional mirror-at-send</text>
+  <text x="372" y="296" text-anchor="middle" class="body">toggle</text>
+
+  <rect x="504" y="164" width="200" height="120" rx="8" class="node"/>
+  <text x="520" y="184" class="tag" fill="#647184">IMAGE</text>
+  <text x="604" y="216" text-anchor="middle" class="node-title">Photo grid</text>
+  <text x="604" y="240" text-anchor="middle" class="body">one JPEG</text>
+  <text x="604" y="260" text-anchor="middle" class="body">8 tiles</text>
+
+  <!-- Server -->
+  <rect x="736" y="164" width="200" height="120" rx="8" class="node"/>
+  <text x="752" y="184" class="tag" fill="#647184">READER</text>
+  <text x="836" y="208" text-anchor="middle" class="node-title">Colour reader</text>
+  <text x="836" y="232" text-anchor="middle" class="code">POST /api/colours</text>
+  <text x="836" y="252" text-anchor="middle" class="body">Python · stdlib http.server</text>
+  <text x="836" y="272" text-anchor="middle" class="body">API key stays here</text>
+
+  <rect x="968" y="164" width="200" height="120" rx="8" class="external"/>
+  <text x="984" y="184" class="tag" fill="#647184">EXTERNAL API</text>
+  <text x="1068" y="216" text-anchor="middle" class="node-title">Vision model API</text>
+  <text x="1068" y="240" text-anchor="middle" class="body">reads tiled image</text>
+  <text x="1068" y="260" text-anchor="middle" class="body">returns colour letters</text>
+
+  <!-- Browser assembly and hand-off -->
+  <rect x="968" y="400" width="200" height="160" rx="8" class="focal"/>
+  <text x="984" y="420" class="tag" fill="#c45429">ASSEMBLE</text>
+  <text x="1068" y="448" text-anchor="middle" class="node-title">Browser assembler</text>
+  <text x="1068" y="472" text-anchor="middle" class="body">step table: photo → face</text>
+  <text x="1068" y="492" text-anchor="middle" class="code">back face: rot180</text>
+  <text x="1068" y="512" text-anchor="middle" class="body">flip buttons swap L/R</text>
+  <text x="1068" y="532" text-anchor="middle" class="body">or U/D</text>
+
+  <rect x="736" y="420" width="200" height="120" rx="8" class="node"/>
+  <text x="752" y="440" class="tag" fill="#647184">VERIFY</text>
+  <text x="836" y="468" text-anchor="middle" class="node-title">Legality check</text>
+  <text x="836" y="492" text-anchor="middle" class="body">8 corners are real pieces</text>
+  <text x="836" y="512" text-anchor="middle" class="body">4 of each colour</text>
+
+  <rect x="504" y="420" width="200" height="120" rx="8" class="store"/>
+  <text x="520" y="440" class="tag" fill="#647184">HAND-OFF</text>
+  <text x="604" y="468" text-anchor="middle" class="node-title">localStorage</text>
+  <text x="604" y="492" text-anchor="middle" class="body">hand-off contract</text>
+  <text x="604" y="516" text-anchor="middle" class="code">{face: [4 colours]}</text>
+
+  <rect x="272" y="420" width="200" height="120" rx="8" class="node"/>
+  <text x="288" y="440" class="tag" fill="#647184">CONSUMER</text>
+  <text x="372" y="468" text-anchor="middle" class="node-title">Any 3D cube page</text>
+  <text x="372" y="500" text-anchor="middle" class="code">applyScan()</text>
+
+  <!-- Capture side notes -->
+  <rect x="40" y="600" width="1128" height="48" rx="8" fill="#fff" stroke="#b8c1cc" stroke-width="1" stroke-dasharray="4 4"/>
+  <text x="56" y="628" class="tag" fill="#e66832">CAPTURE UX</text>
+  <text x="176" y="628" class="note">Pair prompts after photos 5 and 7</text>
+  <circle cx="420" cy="624" r="2" fill="#9aa5b3"/>
+  <text x="436" y="628" class="note">Progress shows ticks only until the reader returns</text>
+  <circle cx="820" cy="624" r="2" fill="#9aa5b3"/>
+  <text x="836" y="628" class="note">Bilingual UI</text>
+
+  <!-- Legend -->
+  <line x1="40" y1="676" x2="1160" y2="676" stroke="#d5d9df" stroke-width="1"/>
+  <text x="40" y="700" class="legend" fill="#6f7b8d">KEY</text>
+  <line x1="104" y1="696" x2="144" y2="696" class="arrow"/>
+  <text x="156" y="700" class="body">browser flow</text>
+  <line x1="300" y1="696" x2="340" y2="696" class="arrow-link"/>
+  <text x="352" y="700" class="body">HTTP / API</text>
+  <line x1="496" y1="696" x2="536" y2="696" class="arrow-accent"/>
+  <text x="548" y="700" class="body">verified hand-off</text>
+</svg>
